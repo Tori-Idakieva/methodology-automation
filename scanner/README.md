@@ -18,7 +18,7 @@ The scanner operates in three stages:
 
 ### Two-crawler approach
 
-The scanner runs two crawlers in parallel and merges their results before detection begins.
+The scanner runs two crawlers and merges their results before detection begins.
 
 The **HTTP crawler** (`http_crawler.py`) uses `requests` and `BeautifulSoup` to fetch pages and extract links without executing JavaScript. It is fast and lightweight, and handles redirect scope checks, auth cookie injection, and form discovery from raw HTML.
 
@@ -175,10 +175,10 @@ python3 main.py --target http://localhost:8080 \
 
 | Check | WSTG Reference | Module | Status |
 |---|---|---|---|
-| Cross-Site Scripting (XSS) | WSTG-INPV-01 | `detectors/xss.py` | In progress |
-| SQL Injection | WSTG-INPV-05 | `detectors/sqli.py` | In progress |
-| HTTP Security Headers | WSTG-CONF-07 | `detectors/headers.py` | In progress |
-| Directory Listing | WSTG-CONF-04 | `detectors/dir_listing.py` | In progress |
+| Cross-Site Scripting (XSS) | WSTG-INPV-01 | `detectors/xss.py` | Complete |
+| SQL Injection | WSTG-INPV-05 | `detectors/sqli.py` | Complete |
+| HTTP Security Headers | WSTG-CONF-07 | `detectors/headers.py` | Complete |
+| Directory Listing | WSTG-CONF-04 | `detectors/dir_listing.py` | Complete |
 
 ---
 
@@ -190,6 +190,19 @@ The scanner is designed to be tested locally against intentionally vulnerable ap
 - **OWASP Juice Shop** — `https://github.com/juice-shop/juice-shop`
 
 Both can be run locally via Docker. See their respective repositories for setup instructions.
+
+**DVWA quick start:**
+```bash
+docker pull ghcr.io/digininja/dvwa
+docker run -d -p 42001:80 ghcr.io/digininja/dvwa
+```
+
+Then navigate to `http://localhost:42001`, complete the setup, and run:
+```bash
+python3 main.py --target http://localhost:42001 \
+  --username admin --password password \
+  --format both --screenshots
+```
 
 ---
 
@@ -206,16 +219,17 @@ A structured report written to `<output>.json`. Useful for machine-readable outp
 ```json
 {
   "scanner": "OWASP WSTG Security Scanner",
-  "target": "http://localhost:8080",
+  "target": "http://localhost:42001",
   "timestamp": "2026-05-03T10:00:00+00:00",
   "total_findings": 3,
+  "severity_counts": { "High": 1, "Medium": 2, "Low": 0, "Info": 0 },
   "findings": [
     {
-      "type": "XSS",
-      "url": "http://localhost:8080/search?q=...",
+      "type": "SQL Injection (Error-Based)",
+      "url": "http://localhost:42001/vulnerabilities/sqli/?id=1",
       "severity": "High",
-      "detail": "Payload reflected and executed in browser DOM",
-      "evidence": "evidence/xss_search.png"
+      "detail": "Parameter 'id' triggered a database error response.",
+      "evidence": "Payload: ' OR '1'='1 | Response snippet: ...SQL syntax error..."
     }
   ]
 }

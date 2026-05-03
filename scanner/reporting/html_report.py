@@ -3,20 +3,21 @@ reporting/html_report.py — HTML report writer.
 
 Generates a self-contained, styled HTML report from scan findings.
 Easier to read than JSON — intended for sharing and presentation.
+No external dependencies — all CSS is inlined.
 """
 
-from typing import List
 from datetime import datetime, timezone
+from typing import List
 from config import ScannerConfig
+from utils.file_handler import save_html
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Severity badge colours
 SEVERITY_COLOURS = {
     "High":   "#e74c3c",
     "Medium": "#e67e22",
-    "Low":    "#f1c40f",
+    "Low":    "#f0b429",
     "Info":   "#3498db",
 }
 
@@ -27,34 +28,211 @@ class HTMLReporter:
     def __init__(self, config: ScannerConfig):
         self.config = config
 
-    def write(self, findings: List[dict], path: str) -> str:
+    def write(self, findings: List[dict]) -> str:
         """
-        Render findings as a self-contained HTML file and write to `path`.
+        Render findings as a self-contained HTML file at <config.output>.html.
 
         Returns the path of the written file.
         """
-        # TODO:
-        #   - call _render(findings) to get HTML string
-        #   - write to path
-        raise NotImplementedError
+        path = f"{self.config.output}.html"
+        html = self._render(findings)
+        save_html(path, html)
+        logger.info(f"HTML report written to: {path}")
+        return path
 
     def _render(self, findings: List[dict]) -> str:
-        """
-        Build and return the full HTML document as a string.
+        """Build and return the full HTML document as a string."""
+        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        counts    = self._severity_counts(findings)
 
-        Structure:
-          - Header with scan metadata (target, timestamp, total findings)
-          - Severity summary bar (counts per severity)
-          - Findings table (severity badge | type | url | detail | evidence)
-        """
-        # TODO: build HTML using f-strings or a simple template
-        raise NotImplementedError
+        # Sort findings High → Medium → Low → Info
+        severity_order = {"High": 0, "Medium": 1, "Low": 2, "Info": 3}
+        sorted_findings = sorted(
+            findings,
+            key=lambda f: severity_order.get(f.get("severity", "Info"), 4)
+        )
 
-    def _severity_badge(self, severity: str) -> str:
-        """Return an inline-styled HTML badge span for the given severity."""
-        colour = SEVERITY_COLOURS.get(severity, "#888")
+        rows = "".join(self._render_row(f) for f in sorted_findings)
+        summary_cards = self._render_summary_cards(counts, len(findings))
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scan Report — {self.config.target}</title>
+  <style>
+    *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #f4f6f8;
+      color: #2d3748;
+      padding: 2rem;
+    }}
+    header {{
+      background: #1a202c;
+      color: #fff;
+      padding: 1.5rem 2rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+    }}
+    header h1 {{ font-size: 1.4rem; font-weight: 700; margin-bottom: 0.4rem; }}
+    header p  {{ font-size: 0.9rem; color: #a0aec0; }}
+    .cards {{
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }}
+    .card {{
+      flex: 1;
+      min-width: 120px;
+      background: #fff;
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      border-top: 4px solid #ccc;
+    }}
+    .card .count {{ font-size: 2rem; font-weight: 700; }}
+    .card .label {{ font-size: 0.8rem; color: #718096; margin-top: 0.2rem; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }}
+    thead tr {{ background: #1a202c; color: #fff; }}
+    th {{
+      text-align: left;
+      padding: 0.75rem 1rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }}
+    td {{
+      padding: 0.75rem 1rem;
+      font-size: 0.88rem;
+      border-bottom: 1px solid #e2e8f0;
+      vertical-align: top;
+      word-break: break-word;
+    }}
+    tr:last-child td {{ border-bottom: none; }}
+    tr:hover td {{ background: #f7fafc; }}
+    .badge {{
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 12px;
+      color: #fff;
+      font-size: 0.78rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .evidence {{
+      font-family: monospace;
+      font-size: 0.8rem;
+      background: #f4f6f8;
+      padding: 4px 8px;
+      border-radius: 4px;
+      color: #4a5568;
+    }}
+    footer {{
+      text-align: center;
+      margin-top: 2rem;
+      font-size: 0.8rem;
+      color: #a0aec0;
+    }}
+    .no-findings {{
+      background: #fff;
+      border-radius: 8px;
+      padding: 3rem;
+      text-align: center;
+      color: #48bb78;
+      font-size: 1.1rem;
+      font-weight: 600;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>OWASP WSTG Security Scanner — Scan Report</h1>
+    <p>Target: {self.config.target} &nbsp;|&nbsp; Generated: {timestamp}</p>
+  </header>
+
+  {summary_cards}
+
+  {"<table><thead><tr><th>Severity</th><th>Type</th><th>URL</th><th>Detail</th><th>Evidence</th></tr></thead><tbody>" + rows + "</tbody></table>" if findings else '<div class="no-findings">&#10003; No vulnerabilities found.</div>'}
+
+  <footer>Generated by OWASP WSTG Security Scanner</footer>
+</body>
+</html>"""
+
+    def _render_row(self, finding: dict) -> str:
+        """Render a single finding as an HTML table row."""
+        severity = finding.get("severity", "Info")
+        colour   = SEVERITY_COLOURS.get(severity, "#888")
+        badge    = self._severity_badge(severity, colour)
+
+        url      = self._escape(finding.get("url",      "—"))
+        ftype    = self._escape(finding.get("type",     "—"))
+        detail   = self._escape(finding.get("detail",   "—"))
+        evidence = self._escape(finding.get("evidence", "—"))
+
         return (
-            f'<span style="background:{colour};color:#fff;'
-            f'padding:2px 8px;border-radius:4px;font-size:0.85em;">'
-            f'{severity}</span>'
+            f"<tr>"
+            f"<td>{badge}</td>"
+            f"<td>{ftype}</td>"
+            f"<td><a href='{url}' style='color:#3182ce;word-break:break-all'>{url}</a></td>"
+            f"<td>{detail}</td>"
+            f"<td><span class='evidence'>{evidence}</span></td>"
+            f"</tr>\n"
+        )
+
+    def _render_summary_cards(self, counts: dict, total: int) -> str:
+        """Render the severity count cards above the table."""
+        cards = ""
+        for severity, colour in SEVERITY_COLOURS.items():
+            count = counts.get(severity, 0)
+            cards += (
+                f'<div class="card" style="border-top-color:{colour}">'
+                f'<div class="count" style="color:{colour}">{count}</div>'
+                f'<div class="label">{severity}</div>'
+                f"</div>\n"
+            )
+        cards += (
+            f'<div class="card" style="border-top-color:#1a202c">'
+            f'<div class="count" style="color:#1a202c">{total}</div>'
+            f'<div class="label">Total</div>'
+            f"</div>\n"
+        )
+        return f'<div class="cards">\n{cards}</div>'
+
+    def _severity_badge(self, severity: str, colour: str) -> str:
+        """Return an inline-styled HTML badge span."""
+        return (
+            f'<span class="badge" style="background:{colour}">'
+            f"{severity}</span>"
+        )
+
+    def _severity_counts(self, findings: List[dict]) -> dict:
+        """Return a dict of {severity: count} across all findings."""
+        counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
+        for f in findings:
+            sev = f.get("severity", "Info")
+            counts[sev] = counts.get(sev, 0) + 1
+        return counts
+
+    @staticmethod
+    def _escape(text: str) -> str:
+        """Escape HTML special characters to prevent report injection."""
+        return (
+            text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+                .replace("'", "&#39;")
         )
