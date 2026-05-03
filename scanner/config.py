@@ -7,6 +7,7 @@ so they never need to be scattered across module files.
 
 import argparse
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -16,10 +17,10 @@ class ScannerConfig:
     output: str = "report"              # base name, no extension
     format: str = "html"
 
-    # Credentials / auth
-    auth_cookie: str = None
-    username: str = None
-    password: str = None
+    # Credentials / auth — all optional, None when not supplied
+    auth_cookie: Optional[str] = None
+    username:    Optional[str] = None
+    password:    Optional[str] = None
 
     # Crawl settings
     max_depth: int = 2

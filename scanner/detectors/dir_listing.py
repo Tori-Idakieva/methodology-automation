@@ -17,6 +17,7 @@ from typing import List, Optional
 from config import ScannerConfig
 from payloads import DIR_LISTING_SIGNATURES
 from utils.logger import get_logger
+from utils.http import build_session
 
 logger = get_logger(__name__)
 
@@ -43,12 +44,7 @@ class DirectoryListingDetector:
 
     def __init__(self, config: ScannerConfig):
         self.config = config
-        self.session = requests.Session()
-        self.session.headers.update(config.default_headers)
-
-        if config.auth_cookie:
-            name, _, value = config.auth_cookie.partition("=")
-            self.session.cookies.set(name.strip(), value.strip())
+        self.session = build_session(config)
 
     def run(self, urls: List[str]) -> List[dict]:
         """

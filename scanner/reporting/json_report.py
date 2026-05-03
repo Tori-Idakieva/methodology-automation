@@ -5,12 +5,12 @@ Serialises all findings to a structured JSON file for machine-readable
 output, archiving, and potential import into other tooling.
 """
 
-import json
 from datetime import datetime, timezone
 from typing import List
 from config import ScannerConfig
 from utils.file_handler import write_json
 from utils.logger import get_logger
+from reporting import severity_counts
 
 logger = get_logger(__name__)
 
@@ -35,7 +35,7 @@ class JSONReporter:
 
     def _build_report(self, findings: List[dict]) -> dict:
         """Wrap findings in a top-level report envelope."""
-        counts = self._severity_counts(findings)
+        counts = severity_counts(findings)
         return {
             "scanner":        "OWASP WSTG Security Scanner",
             "target":         self.config.target,
@@ -45,10 +45,3 @@ class JSONReporter:
             "findings":       findings,
         }
 
-    def _severity_counts(self, findings: List[dict]) -> dict:
-        """Return a dict of {severity: count} across all findings."""
-        counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
-        for f in findings:
-            sev = f.get("severity", "Info")
-            counts[sev] = counts.get(sev, 0) + 1
-        return counts

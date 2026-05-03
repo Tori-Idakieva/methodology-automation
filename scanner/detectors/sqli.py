@@ -13,11 +13,12 @@ Strategy:
 """
 
 import requests
-from urllib.parse import urlparse, urlencode, parse_qs, urlunparse
 from typing import List, Optional
 from config import ScannerConfig
 from payloads import SQLI_PAYLOADS, SQLI_ERROR_SIGNATURES
 from utils.logger import get_logger
+from utils.http import build_session
+from utils.url import inject_param
 
 logger = get_logger(__name__)
 
@@ -28,15 +29,10 @@ BOOLEAN_DIFF_THRESHOLD = 0.20  # 20%
 class SQLiDetector:
     """Detect SQL injection vulnerabilities via error-based and boolean probes."""
 
-    def __init__(self, config: ScannerConfig, forms: List[dict] = None):
+    def __init__(self, config: ScannerConfig, forms: Optional[List[dict]] = None):
         self.config = config
         self.forms = forms or []          # form vectors from the crawlers
-        self.session = requests.Session()
-        self.session.headers.update(config.default_headers)
-
-        if config.auth_cookie:
-            name, _, value = config.auth_cookie.partition("=")
-            self.session.cookies.set(name.strip(), value.strip())
+        self.session = build_session(config)
 
     def run(self, urls: List[str]) -> List[dict]:
         """
@@ -83,7 +79,7 @@ class SQLiDetector:
         for param in params:
             payloads = SQLI_PAYLOADS[:self.config.max_payloads_per_param]
             for payload in payloads:
-                injected_url = self._inject_param(url, param, payload)
+                injected_url = inject_param(url, param, payload)
                 logger.debug(f"SQLi probe [{param}]: {injected_url}")
 
                 # Error-based probe
@@ -242,17 +238,6 @@ class SQLiDetector:
                     "evidence": f"Payload: {payload} | Response snippet: ...{snippet}...",
                 }
         return None
-
-    def _inject_param(self, url: str, param: str, payload: str) -> str:
-        """
-        Return a copy of `url` with `param` replaced by `payload`.
-        All other parameters retain their original values.
-        """
-        parsed = urlparse(url)
-        params = parse_qs(parsed.query, keep_blank_values=True)
-        params[param] = [payload]
-        new_query = urlencode(params, doseq=True)
-        return urlunparse(parsed._replace(query=new_query))
 
     def _fetch(self, url: str) -> Optional[requests.Response]:
         """GET `url` and return the response, or None on failure."""

@@ -12,6 +12,7 @@ from rich import box
 from typing import List
 from config import ScannerConfig
 from utils.logger import get_logger
+from reporting import severity_counts, SEVERITY_ORDER
 
 logger = get_logger(__name__)
 
@@ -59,10 +60,9 @@ class SummaryReporter:
         table.add_column("Detail",    style="white", overflow="fold")
 
         # Sort findings: High → Medium → Low → Info
-        severity_order = {"High": 0, "Medium": 1, "Low": 2, "Info": 3}
         sorted_findings = sorted(
             findings,
-            key=lambda f: severity_order.get(f.get("severity", "Info"), 4)
+            key=lambda f: SEVERITY_ORDER.get(f.get("severity", "Info"), 4)
         )
 
         for finding in sorted_findings:
@@ -84,7 +84,7 @@ class SummaryReporter:
 
     def _print_counts(self, findings: List[dict]) -> None:
         """Print a one-line severity breakdown below the table."""
-        counts = self._severity_counts(findings)
+        counts = severity_counts(findings)
         total  = len(findings)
 
         parts = []
@@ -97,10 +97,3 @@ class SummaryReporter:
         console.print(summary_line)
         console.print()
 
-    def _severity_counts(self, findings: List[dict]) -> dict:
-        """Return a dict of {severity: count} across all findings."""
-        counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
-        for f in findings:
-            sev = f.get("severity", "Info")
-            counts[sev] = counts.get(sev, 0) + 1
-        return counts

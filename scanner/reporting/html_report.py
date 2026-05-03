@@ -11,6 +11,7 @@ from typing import List
 from config import ScannerConfig
 from utils.file_handler import save_html
 from utils.logger import get_logger
+from reporting import severity_counts, SEVERITY_ORDER
 
 logger = get_logger(__name__)
 
@@ -43,13 +44,12 @@ class HTMLReporter:
     def _render(self, findings: List[dict]) -> str:
         """Build and return the full HTML document as a string."""
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        counts    = self._severity_counts(findings)
+        counts    = severity_counts(findings)
 
         # Sort findings High → Medium → Low → Info
-        severity_order = {"High": 0, "Medium": 1, "Low": 2, "Info": 3}
         sorted_findings = sorted(
             findings,
-            key=lambda f: severity_order.get(f.get("severity", "Info"), 4)
+            key=lambda f: SEVERITY_ORDER.get(f.get("severity", "Info"), 4)
         )
 
         rows = "".join(self._render_row(f) for f in sorted_findings)
@@ -183,12 +183,10 @@ class HTMLReporter:
         evidence = self._escape(finding.get("evidence", "—"))
 
         # NVD enrichment fields
-        cwe_id       = finding.get("cwe_id",    "N/A")
-        wstg_ref     = finding.get("wstg_ref",  "N/A")
-        cve_count    = finding.get("cve_count",  "N/A")
-        nvd_url      = finding.get("nvd_url",   "")
-        sample_cve   = finding.get("sample_cve", "")
-        sample_url   = finding.get("sample_cve_url", "")
+        cwe_id    = finding.get("cwe_id",   "N/A")
+        wstg_ref  = finding.get("wstg_ref", "N/A")
+        cve_count = finding.get("cve_count", "N/A")
+        nvd_url   = finding.get("nvd_url",  "")
 
         cwe_cell = (
             f"<a href='https://cwe.mitre.org/data/definitions/{cwe_id.replace('CWE-', '')}.html' "
@@ -238,14 +236,6 @@ class HTMLReporter:
             f'<span class="badge" style="background:{colour}">'
             f"{severity}</span>"
         )
-
-    def _severity_counts(self, findings: List[dict]) -> dict:
-        """Return a dict of {severity: count} across all findings."""
-        counts = {"High": 0, "Medium": 0, "Low": 0, "Info": 0}
-        for f in findings:
-            sev = f.get("severity", "Info")
-            counts[sev] = counts.get(sev, 0) + 1
-        return counts
 
     @staticmethod
     def _escape(text: str) -> str:

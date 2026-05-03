@@ -10,10 +10,11 @@ detectors as injection vectors for XSS and SQLi testing.
 
 import requests
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse, urlunparse
 from typing import List, Optional
 from config import ScannerConfig
 from utils.logger import get_logger
+from utils.http import build_session
+from utils.url import normalise_url, in_scope
 
 logger = get_logger(__name__)
 
@@ -27,15 +28,8 @@ class HttpCrawler:
         self.found_urls: List[str] = []
         self.forms: List[dict] = []         # discovered form injection vectors
 
-        # Build a persistent session — reuses connections and carries headers
-        self.session = requests.Session()
-        self.session.headers.update(config.default_headers)
-
-        # Inject auth cookie if provided (e.g. "PHPSESSID=abc123")
-        if config.auth_cookie:
-            name, _, value = config.auth_cookie.partition("=")
-            self.session.cookies.set(name.strip(), value.strip())
-            logger.debug(f"Auth cookie set: {name.strip()}")
+        # Build a persistent session — reuses connections and carries headers/cookies
+        self.session = build_session(config)
 
     def crawl(self, url: str = None, depth: int = 0) -> List[str]:
         """
@@ -58,7 +52,7 @@ class HttpCrawler:
         if url in self.visited:
             return self.found_urls
 
-        if not self._in_scope(url):
+        if not in_scope(url, self.config.target):
             logger.debug(f"Out of scope, skipping: {url}")
             return self.found_urls
 
@@ -99,7 +93,7 @@ class HttpCrawler:
                 allow_redirects=True,
             )
             # If redirected out of scope, discard
-            if not self._in_scope(response.url):
+            if not in_scope(response.url, self.config.target):
                 logger.warning(f"Redirect out of scope: {url} → {response.url}")
                 return None
 
@@ -130,9 +124,9 @@ class HttpCrawler:
             if href.startswith(("mailto:", "javascript:", "tel:", "#")):
                 continue
 
-            normalised = self._normalise_url(base_url, href)
+            normalised = normalise_url(base_url, href)
 
-            if normalised and normalised not in self.visited and self._in_scope(normalised):
+            if normalised and normalised not in self.visited and in_scope(normalised, self.config.target):
                 links.append(normalised)
 
         return links
@@ -151,7 +145,7 @@ class HttpCrawler:
         forms = []
 
         for form in soup.find_all("form"):
-            action = self._normalise_url(base_url, form.get("action") or base_url)
+            action = normalise_url(base_url, form.get("action") or base_url)
             method = form.get("method", "get").lower()
             inputs = [
                 i.get("name")
@@ -167,30 +161,3 @@ class HttpCrawler:
 
         return forms
 
-    def _normalise_url(self, base_url: str, href: str) -> Optional[str]:
-        """
-        Resolve `href` against `base_url` and strip URL fragments.
-
-        Returns the normalised absolute URL, or None if the scheme is invalid.
-        """
-        try:
-            absolute = urljoin(base_url, href)
-            parsed = urlparse(absolute)
-
-            # Only follow http/https URLs
-            if parsed.scheme not in ("http", "https"):
-                return None
-
-            # Strip fragment (#section) — fragments are client-side only
-            clean = parsed._replace(fragment="")
-            return urlunparse(clean)
-
-        except Exception as e:
-            logger.debug(f"Could not normalise URL '{href}': {e}")
-            return None
-
-    def _in_scope(self, url: str) -> bool:
-        """Return True if `url` belongs to the same domain as the target."""
-        target_netloc = urlparse(self.config.target).netloc
-        url_netloc = urlparse(url).netloc
-        return url_netloc == target_netloc

@@ -15,6 +15,8 @@ from typing import List, Optional
 from config import ScannerConfig
 from payloads import EXPECTED_SECURITY_HEADERS
 from utils.logger import get_logger
+from utils.http import build_session
+from utils.url import origin
 
 logger = get_logger(__name__)
 
@@ -34,12 +36,7 @@ class HeadersDetector:
 
     def __init__(self, config: ScannerConfig):
         self.config = config
-        self.session = requests.Session()
-        self.session.headers.update(config.default_headers)
-
-        if config.auth_cookie:
-            name, _, value = config.auth_cookie.partition("=")
-            self.session.cookies.set(name.strip(), value.strip())
+        self.session = build_session(config)
 
     def run(self, urls: List[str]) -> List[dict]:
         """
@@ -54,10 +51,10 @@ class HeadersDetector:
         seen_origins = set()
 
         for url in urls:
-            origin = self._origin(url)
-            if origin in seen_origins:
+            url_origin = origin(url)
+            if url_origin in seen_origins:
                 continue
-            seen_origins.add(origin)
+            seen_origins.add(url_origin)
             findings.extend(self._test_url(url))
 
         return findings
@@ -174,8 +171,3 @@ class HeadersDetector:
         weak_values = WEAK_HEADER_VALUES.get(header, [])
         return value.strip().upper() in [w.upper() for w in weak_values]
 
-    def _origin(self, url: str) -> str:
-        """Return the scheme + host of a URL (e.g. 'http://localhost:8080')."""
-        from urllib.parse import urlparse
-        p = urlparse(url)
-        return f"{p.scheme}://{p.netloc}"

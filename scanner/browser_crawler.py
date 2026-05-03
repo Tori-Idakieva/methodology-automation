@@ -7,11 +7,11 @@ Also handles login, form extraction, screenshot capture, and dialog detection.
 """
 
 from playwright.sync_api import sync_playwright, Page, Dialog
-from urllib.parse import urljoin, urlparse, urlunparse
 from typing import List, Optional
 from config import ScannerConfig
 from utils.logger import get_logger
 from utils.file_handler import screenshot_path, ensure_evidence_dir
+from utils.url import normalise_url, in_scope
 
 logger = get_logger(__name__)
 
@@ -91,10 +91,6 @@ class BrowserCrawler:
             logger.warning(f"Screenshot failed for '{label}': {e}")
             return None
 
-    def close(self):
-        """No-op — browser lifecycle is managed inside crawl() via context manager."""
-        pass
-
     # ------------------------------------------------------------------
     # Internal crawl logic
     # ------------------------------------------------------------------
@@ -114,7 +110,7 @@ class BrowserCrawler:
         if url in self.visited:
             return
 
-        if not self._in_scope(url):
+        if not in_scope(url, self.config.target):
             logger.debug(f"Out of scope, skipping: {url}")
             return
 
@@ -230,8 +226,8 @@ class BrowserCrawler:
 
         links = []
         for href in hrefs:
-            normalised = self._normalise_url(base_url, href)
-            if normalised and normalised not in self.visited and self._in_scope(normalised):
+            normalised = normalise_url(base_url, href)
+            if normalised and normalised not in self.visited and in_scope(normalised, self.config.target):
                 links.append(normalised)
 
         return links
@@ -262,7 +258,7 @@ class BrowserCrawler:
 
         forms = []
         for f in raw_forms:
-            action = self._normalise_url(base_url, f["action"]) or base_url
+            action = normalise_url(base_url, f["action"]) or base_url
             forms.append({
                 "url":    base_url,
                 "action": action,
@@ -296,25 +292,3 @@ class BrowserCrawler:
 
         page.on("dialog", handle_dialog)
 
-    # ------------------------------------------------------------------
-    # URL helpers
-    # ------------------------------------------------------------------
-
-    def _normalise_url(self, base_url: str, href: str) -> Optional[str]:
-        """Resolve `href` against `base_url`, strip fragments, validate scheme."""
-        try:
-            absolute = urljoin(base_url, href)
-            parsed = urlparse(absolute)
-            if parsed.scheme not in ("http", "https"):
-                return None
-            clean = parsed._replace(fragment="")
-            return urlunparse(clean)
-        except Exception as e:
-            logger.debug(f"Could not normalise URL '{href}': {e}")
-            return None
-
-    def _in_scope(self, url: str) -> bool:
-        """Return True if `url` belongs to the same domain as the target."""
-        target_netloc = urlparse(self.config.target).netloc
-        url_netloc = urlparse(url).netloc
-        return url_netloc == target_netloc
