@@ -10,7 +10,32 @@ The scanner operates in three stages:
 
 1. **Crawl** — Discovers URLs on the target using both HTTP requests and a headless browser, capturing content that requires JavaScript execution or client-side rendering.
 2. **Detect** — Runs vulnerability checks across discovered URLs, injecting payloads and analysing responses for signs of weakness.
-3. **Report** — Outputs a structured JSON report and a human-readable terminal summary of all findings.
+3. **Report** — Writes an HTML report (default) and/or a JSON report, and prints a colour-coded terminal summary.
+
+---
+
+## How It Works
+
+### Two-crawler approach
+
+The scanner runs two crawlers in parallel and merges their results before detection begins.
+
+The **HTTP crawler** (`http_crawler.py`) uses `requests` and `BeautifulSoup` to fetch pages and extract links without executing JavaScript. It is fast and lightweight, and handles redirect scope checks, auth cookie injection, and form discovery from raw HTML.
+
+The **browser crawler** (`browser_crawler.py`) uses Playwright to navigate pages in a real headless Chromium browser. It executes JavaScript, handles client-side routing, and can interact with dynamic content. It also handles login form submission if credentials are provided, captures screenshots as evidence, and listens for browser dialog events (`alert`, `confirm`, `prompt`) which are used as XSS confirmation signals.
+
+Both crawlers produce a list of discovered URLs and a list of form injection vectors (action URL, method, input field names) that the detectors consume directly.
+
+### Authentication
+
+The scanner supports two authentication methods:
+
+- **Credentials** (`--username` / `--password`) — the browser crawler navigates to the target, detects the login form, fills in the credentials and submits before crawling begins. Generic enough to work with DVWA and Juice Shop without hardcoding field names.
+- **Session cookie** (`--auth-cookie`) — injects a pre-existing session cookie into both the HTTP session and the browser context, bypassing the login step entirely.
+
+### Evidence
+
+When `--screenshots` is enabled, the browser crawler saves a full-page screenshot of every crawled page and any triggered alert dialogs to an `evidence/` directory created automatically in the working directory.
 
 ---
 
@@ -37,11 +62,18 @@ scanner/
 │   └── summary.py        # Prints a colour-coded terminal summary
 ├── utils/
 │   ├── __init__.py
-│   ├── logger.py         # Centralised logging (get_logger)
+│   ├── logger.py         # Centralised logging (get_logger, configure_from_config)
 │   └── file_handler.py   # File I/O helpers and screenshot path management
 ├── requirements.txt
 └── README.md
 ```
+
+---
+
+## Requirements
+
+- Python 3.9 or higher
+- pip
 
 ---
 
@@ -53,9 +85,10 @@ scanner/
 pip install -r requirements.txt
 ```
 
-### 2. Install Playwright browsers
+### 2. Install Playwright and Chromium
 
 ```bash
+pip install playwright
 playwright install chromium
 ```
 
@@ -86,15 +119,25 @@ python3 main.py --help
 | `--auth-cookie` | | `None` | Session cookie to attach to requests (e.g. `PHPSESSID=abc123`) |
 | `--browser-timeout` | | `15000` | Playwright navigation timeout in milliseconds |
 | `--format` | | `html` | Report output format: `json`, `html`, or `both` |
+| `--headless` | | `True` | Run Playwright in headless mode |
 | `--help` | `-h` | | Print all available options and exit |
 | `--log-level` | | `info` | Logging verbosity: `debug`, `info`, `warning`, `error`, `critical`. Overridden by `--verbose` |
-| `--headless` | | `True` | Run Playwright in headless mode |
 | `--max-depth` | | `2` | Maximum crawl depth from the starting URL |
 | `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |
 | `--password` | | `None` | Password for login — use with `--username` |
 | `--screenshots` | | `False` | Capture browser screenshots as evidence for findings |
 | `--username` | | `None` | Username for login — use with `--password` |
-| `--verbose` | `-v` | `False` | Enable debug-level logging output |
+| `--verbose` | `-v` | `False` | Force debug-level logging, overrides `--log-level` |
+
+### Log levels
+
+| Level | When to use |
+|---|---|
+| `debug` | Fine-grained detail — payloads injected, raw responses, every URL visited |
+| `info` | General progress — pages crawled, findings recorded (default) |
+| `warning` | Unexpected but recoverable — timeouts, redirects out of scope |
+| `error` | A check or request failed, scan continues |
+| `critical` | Fatal error, scanner cannot continue |
 
 ### Examples
 
@@ -113,21 +156,29 @@ python3 main.py --target http://localhost:8080 --username admin --password passw
 python3 main.py --target http://localhost:8080 --auth-cookie "PHPSESSID=abc123"
 ```
 
-**Full scan with screenshots and verbose output:**
+**Scan with JSON output and warning-level logging:**
 ```bash
-python3 main.py --target http://localhost:8080 --username admin --password password --screenshots --verbose --output results
+python3 main.py --target http://localhost:8080 --format json --log-level warning
+```
+
+**Full scan with screenshots, both report formats, and debug logging:**
+```bash
+python3 main.py --target http://localhost:8080 \
+  --username admin --password password \
+  --screenshots --format both \
+  --log-level debug --output results
 ```
 
 ---
 
 ## OWASP WSTG Coverage
 
-| Check | WSTG Reference | Module |
-|---|---|---|
-| Cross-Site Scripting (XSS) | WSTG-INPV-01 | `detectors/xss.py` |
-| SQL Injection | WSTG-INPV-05 | `detectors/sqli.py` |
-| HTTP Security Headers | WSTG-CONF-07 | `detectors/headers.py` |
-| Directory Listing | WSTG-CONF-04 | `detectors/dir_listing.py` |
+| Check | WSTG Reference | Module | Status |
+|---|---|---|---|
+| Cross-Site Scripting (XSS) | WSTG-INPV-01 | `detectors/xss.py` | In progress |
+| SQL Injection | WSTG-INPV-05 | `detectors/sqli.py` | In progress |
+| HTTP Security Headers | WSTG-CONF-07 | `detectors/headers.py` | In progress |
+| Directory Listing | WSTG-CONF-04 | `detectors/dir_listing.py` | In progress |
 
 ---
 
@@ -173,6 +224,10 @@ A structured report written to `<output>.json`. Useful for machine-readable outp
 ### Terminal summary
 
 A colour-coded table is printed to stdout at the end of the scan showing all findings grouped by severity.
+
+### Evidence directory
+
+When `--screenshots` is enabled, a folder named `evidence/` is created automatically in the working directory. It contains full-page PNG screenshots of crawled pages and any triggered alert dialogs, named by page index or vulnerability label.
 
 ---
 
