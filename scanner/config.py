@@ -32,6 +32,7 @@ class ScannerConfig:
     screenshots: bool = False
 
     # Logging
+    log_level: str = "info"
     verbose: bool = False
 
     # HTTP session headers
@@ -56,5 +57,6 @@ class ScannerConfig:
             headless=args.headless,
             browser_timeout=args.browser_timeout,
             screenshots=args.screenshots,
+            log_level=args.log_level,
             verbose=args.verbose,
         )

@@ -14,7 +14,7 @@ from detectors.headers import HeadersDetector
 from detectors.dir_listing import DirectoryListingDetector
 from reporting.json_report import JSONReporter
 from reporting.summary import SummaryReporter
-from utils.logger import get_logger
+from utils.logger import get_logger, configure_from_config
 
 logger = get_logger(__name__)
 
@@ -22,6 +22,7 @@ logger = get_logger(__name__)
 def main():
     args = parse_args()
     config = ScannerConfig.from_args(args)
+    configure_from_config(log_level=config.log_level, verbose=config.verbose)
 
     logger.info(f"Starting scan against: {config.target}")
 

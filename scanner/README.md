@@ -87,6 +87,7 @@ python3 main.py --help
 | `--browser-timeout` | | `15000` | Playwright navigation timeout in milliseconds |
 | `--format` | | `html` | Report output format: `json`, `html`, or `both` |
 | `--help` | `-h` | | Print all available options and exit |
+| `--log-level` | | `info` | Logging verbosity: `debug`, `info`, `warning`, `error`, `critical`. Overridden by `--verbose` |
 | `--headless` | | `True` | Run Playwright in headless mode |
 | `--max-depth` | | `2` | Maximum crawl depth from the starting URL |
 | `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |

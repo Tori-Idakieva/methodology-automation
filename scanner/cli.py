@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
         help="Run Playwright in headless mode (default: True)",
     )
     parser.add_argument(
+        "--log-level",
+        choices=["debug", "info", "warning", "error", "critical"],
+        default="info",
+        help="Set logging verbosity (default: info). Overridden by --verbose.",
+    )
+    parser.add_argument(
         "--max-depth",
         type=int,
         default=2,
