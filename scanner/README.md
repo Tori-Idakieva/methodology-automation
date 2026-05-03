@@ -6,11 +6,13 @@ A Python-based web vulnerability scanner that combines traditional HTTP-level te
 
 ## Overview
 
-The scanner operates in three stages:
+The scanner operates in five stages:
 
 1. **Crawl** — Discovers URLs on the target using both HTTP requests and a headless browser, capturing content that requires JavaScript execution or client-side rendering.
-2. **Detect** — Runs vulnerability checks across discovered URLs, injecting payloads and analysing responses for signs of weakness.
-3. **Report** — Writes an HTML report (default) and/or a JSON report, and prints a colour-coded terminal summary.
+2. **Detect** — Runs built-in vulnerability checks across discovered URLs, injecting payloads and analysing responses for signs of weakness.
+3. **Integrate** — Optionally invokes external Kali Linux tools (sqlmap, Nikto) for deeper, specialised testing of the same targets.
+4. **Enrich** — Queries the NVD CVE API 2.0 to annotate each finding with its CWE ID, OWASP WSTG reference, related CVE count, and average CVSS score.
+5. **Report** — Writes an HTML report (default) and/or a JSON report, and prints a colour-coded terminal summary.
 
 ---
 
@@ -43,7 +45,7 @@ When `--screenshots` is enabled, the browser crawler saves a full-page screensho
 
 ```
 scanner/
-├── main.py               # Entry point — orchestrates crawl → detect → report
+├── main.py               # Entry point — orchestrates crawl → detect → integrate → enrich → report
 ├── cli.py                # Argument parsing
 ├── config.py             # Central configuration (timeouts, limits, defaults)
 ├── http_crawler.py       # HTTP-level crawler (requests + BeautifulSoup)
@@ -55,6 +57,11 @@ scanner/
 │   ├── sqli.py           # SQL Injection detector (WSTG-INPV-05)
 │   ├── headers.py        # Security header analyser (WSTG-CONF-07)
 │   └── dir_listing.py    # Directory listing detector (WSTG-CONF-04)
+├── integrations/
+│   ├── __init__.py
+│   ├── nvd_api.py        # NVD CVE API 2.0 enrichment (CWE, CVSS, CVE count)
+│   ├── sqlmap_runner.py  # sqlmap subprocess wrapper (optional, --use-sqlmap)
+│   └── nikto_runner.py   # Nikto subprocess wrapper (optional, --use-nikto)
 ├── reporting/
 │   ├── __init__.py
 │   ├── html_report.py    # Writes findings to a styled HTML file
@@ -126,6 +133,8 @@ python3 main.py --help
 | `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |
 | `--password` | | `None` | Password for login — use with `--username` |
 | `--screenshots` | | `False` | Capture browser screenshots as evidence for findings |
+| `--use-nikto` | | `False` | Run Nikto against the target after built-in checks (requires Nikto on PATH) |
+| `--use-sqlmap` | | `False` | Run sqlmap against injectable URLs after built-in checks (requires sqlmap on PATH) |
 | `--username` | | `None` | Username for login — use with `--password` |
 | `--verbose` | `-v` | `False` | Force debug-level logging, overrides `--log-level` |
 
@@ -169,6 +178,62 @@ python3 main.py --target http://localhost:8080 \
   --log-level debug --output results
 ```
 
+**Scan with external tools (sqlmap + Nikto):**
+```bash
+python3 main.py --target http://localhost:8080 \
+  --username admin --password password \
+  --use-sqlmap --use-nikto --format both
+```
+
+---
+
+## External Tool Integrations
+
+Two optional integrations can be enabled at runtime. Both tools degrade gracefully — if they are not installed, the scanner logs a warning and continues without them.
+
+### sqlmap (`--use-sqlmap`)
+
+Runs [sqlmap](https://sqlmap.org/) against any URLs with query parameters and against discovered form actions after the built-in SQLi detector has finished. sqlmap uses a broader injection technique library than the built-in detector and can confirm injections with higher certainty.
+
+Findings from sqlmap are tagged `SQL Injection (sqlmap confirmed)` with severity `High` and `source: sqlmap`.
+
+**Installation (Kali Linux):**
+```bash
+sudo apt install sqlmap
+```
+
+### Nikto (`--use-nikto`)
+
+Runs [Nikto](https://github.com/sullo/nikto) against the root target for web server misconfiguration, outdated software headers, dangerous file paths, and default credentials. Nikto covers checks orthogonal to the built-in detectors.
+
+Severity is inferred from the Nikto message text using keyword matching (e.g. "sql injection" → High, "directory listing" → Medium, "header" → Low). Findings are tagged `Nikto Finding` and `source: nikto`.
+
+**Installation (Kali Linux):**
+```bash
+sudo apt install nikto
+```
+
+---
+
+## NVD CVE Enrichment
+
+Every finding is automatically enriched with data from the [NVD CVE API 2.0](https://nvd.nist.gov/developers/vulnerabilities) after detection completes — no flag required.
+
+Enrichment adds the following fields to each finding:
+
+| Field | Description |
+|---|---|
+| `cwe_id` | Common Weakness Enumeration identifier (e.g. `CWE-79`) |
+| `cwe_name` | Human-readable CWE description |
+| `wstg_ref` | OWASP WSTG test case reference (e.g. `WSTG-INPV-01`) |
+| `owasp_top10` | Mapped OWASP Top 10 2021 category |
+| `cve_count` | Total CVEs in NVD linked to this CWE |
+| `cvss_avg` | Average CVSS base score of the most recent CVEs |
+| `sample_cve` | ID of the most recent relevant CVE |
+| `nvd_url` | Link to NVD search results for the CWE |
+
+The HTML report renders CWE and CVE count as clickable links to MITRE and NVD respectively. The NVD API is queried once per unique CWE with a 6-second delay between requests to respect the unauthenticated rate limit of 5 requests per 30 seconds.
+
 ---
 
 ## OWASP WSTG Coverage
@@ -179,6 +244,8 @@ python3 main.py --target http://localhost:8080 \
 | SQL Injection | WSTG-INPV-05 | `detectors/sqli.py` | Complete |
 | HTTP Security Headers | WSTG-CONF-07 | `detectors/headers.py` | Complete |
 | Directory Listing | WSTG-CONF-04 | `detectors/dir_listing.py` | Complete |
+| SQL Injection (confirmed) | WSTG-INPV-05 | `integrations/sqlmap_runner.py` | Optional (`--use-sqlmap`) |
+| Web Server Misconfiguration | WSTG-CONF-* | `integrations/nikto_runner.py` | Optional (`--use-nikto`) |
 
 ---
 
@@ -202,6 +269,11 @@ Then navigate to `http://localhost:42001`, complete the setup, and run:
 python3 main.py --target http://localhost:42001 \
   --username admin --password password \
   --format both --screenshots
+
+# With external tools on Kali:
+python3 main.py --target http://localhost:42001 \
+  --username admin --password password \
+  --format both --screenshots --use-sqlmap --use-nikto
 ```
 
 ---
@@ -210,7 +282,7 @@ python3 main.py --target http://localhost:42001 \
 
 ### HTML report (default)
 
-A self-contained styled HTML file written to `<output>.html`. Includes a severity summary and a findings table with colour-coded badges — easier to read and share than raw JSON.
+A self-contained styled HTML file written to `<output>.html`. Includes a severity summary card row and a findings table with colour-coded severity badges. Each row includes Severity, Type, URL, Detail, CWE (linked to MITRE), WSTG reference, CVE count (linked to NVD), and Evidence columns — easier to read and share than raw JSON.
 
 ### JSON report
 
@@ -249,7 +321,14 @@ When `--screenshots` is enabled, a folder named `evidence/` is created automatic
 
 | Package | Purpose |
 |---|---|
-| `requests` | HTTP requests for crawling and payload injection |
+| `requests` | HTTP requests for crawling, payload injection, and NVD API calls |
 | `beautifulsoup4` | HTML parsing and link extraction |
 | `playwright` | Headless browser automation and DOM interaction |
 | `rich` | Formatted terminal output for the summary report |
+
+External tools (optional, not installed via pip):
+
+| Tool | Installation | Flag |
+|---|---|---|
+| `sqlmap` | `sudo apt install sqlmap` (Kali) | `--use-sqlmap` |
+| `nikto` | `sudo apt install nikto` (Kali) | `--use-nikto` |

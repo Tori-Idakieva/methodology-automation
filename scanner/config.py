@@ -43,6 +43,10 @@ class ScannerConfig:
     # Payload limits (cap injections per URL to avoid flooding)
     max_payloads_per_param: int = 5
 
+    # External tool integrations (optional, require tools to be installed)
+    use_sqlmap: bool = False
+    use_nikto:  bool = False
+
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "ScannerConfig":
         """Build a ScannerConfig from parsed CLI arguments."""
@@ -59,4 +63,6 @@ class ScannerConfig:
             screenshots=args.screenshots,
             log_level=args.log_level,
             verbose=args.verbose,
+            use_sqlmap=args.use_sqlmap,
+            use_nikto=args.use_nikto,
         )

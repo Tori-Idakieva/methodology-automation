@@ -71,6 +71,18 @@ def parse_args() -> argparse.Namespace:
         help="Target base URL to scan (e.g. http://localhost:8080)",
     )
     parser.add_argument(
+        "--use-nikto",
+        action="store_true",
+        default=False,
+        help="Run Nikto against the target after crawling (requires Nikto installed)",
+    )
+    parser.add_argument(
+        "--use-sqlmap",
+        action="store_true",
+        default=False,
+        help="Run sqlmap against SQLi candidates after detection (requires sqlmap installed)",
+    )
+    parser.add_argument(
         "--username",
         default=None,
         help="Username for login (used with --password to authenticate before scanning). Optional.",

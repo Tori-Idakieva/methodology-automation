@@ -1,7 +1,7 @@
 """
 main.py — Entry point for the OWASP WSTG-aligned security scanner.
 
-Orchestrates the crawl → detect → report pipeline.
+Orchestrates the crawl → detect → integrate → enrich → report pipeline.
 """
 
 from cli import parse_args
@@ -12,6 +12,9 @@ from detectors.xss import XSSDetector
 from detectors.sqli import SQLiDetector
 from detectors.headers import HeadersDetector
 from detectors.dir_listing import DirectoryListingDetector
+from integrations.nvd_api import NVDEnricher
+from integrations.sqlmap_runner import SqlmapRunner
+from integrations.nikto_runner import NiktoRunner
 from reporting.json_report import JSONReporter
 from reporting.html_report import HTMLReporter
 from reporting.summary import SummaryReporter
@@ -32,7 +35,9 @@ def main():
 
     logger.info(f"Starting scan against: {config.target}")
 
-    # --- Crawl ---
+    # ----------------------------------------------------------------
+    # Crawl
+    # ----------------------------------------------------------------
     http_crawler    = HttpCrawler(config)
     browser_crawler = BrowserCrawler(config)
 
@@ -43,7 +48,9 @@ def main():
 
     logger.info(f"Discovered {len(all_urls)} unique URL(s), {len(all_forms)} form(s)")
 
-    # --- Detect ---
+    # ----------------------------------------------------------------
+    # Detect — built-in detectors
+    # ----------------------------------------------------------------
     findings = []
     detectors = [
         XSSDetector(config, forms=all_forms),
@@ -56,9 +63,35 @@ def main():
         results = detector.run(all_urls)
         findings.extend(results)
 
-    logger.info(f"Scan complete — {len(findings)} finding(s) recorded")
+    logger.info(f"Built-in detection complete — {len(findings)} finding(s)")
 
-    # --- Report ---
+    # ----------------------------------------------------------------
+    # External integrations
+    # ----------------------------------------------------------------
+    if config.use_sqlmap:
+        logger.info("Running sqlmap integration...")
+        sqlmap_findings = SqlmapRunner(
+            target=config.target,
+            urls=all_urls,
+            forms=all_forms,
+        ).run()
+        findings.extend(sqlmap_findings)
+        logger.info(f"sqlmap added {len(sqlmap_findings)} finding(s)")
+
+    if config.use_nikto:
+        logger.info("Running Nikto integration...")
+        nikto_findings = NiktoRunner(target=config.target).run()
+        findings.extend(nikto_findings)
+        logger.info(f"Nikto added {len(nikto_findings)} finding(s)")
+
+    logger.info(f"Total findings before enrichment: {len(findings)}")
+
+    # NVD CVE API
+    findings = NVDEnricher().enrich(findings)
+
+    # ----------------------------------------------------------------
+    # Report
+    # ----------------------------------------------------------------
     if config.format in ("json", "both"):
         JSONReporter(config).write(findings)
 
