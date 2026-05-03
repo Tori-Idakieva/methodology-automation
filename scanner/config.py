@@ -48,6 +48,9 @@ class ScannerConfig:
     use_sqlmap: bool = False
     use_nikto:  bool = False
 
+    # Post-scan behaviour
+    open_report: bool = False   # open report(s) in default viewer after writing
+
     @classmethod
     def from_args(cls, args: argparse.Namespace) -> "ScannerConfig":
         """Build a ScannerConfig from parsed CLI arguments."""
@@ -66,4 +69,5 @@ class ScannerConfig:
             verbose=args.verbose,
             use_sqlmap=args.use_sqlmap,
             use_nikto=args.use_nikto,
+            open_report=args.open,
         )

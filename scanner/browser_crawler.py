@@ -38,31 +38,45 @@ class BrowserCrawler:
         """
         start_url = url or self.config.target
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self.config.headless)
-            context = browser.new_context()
+        try:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=self.config.headless)
+                context = browser.new_context()
 
-            # Inject auth cookie into the browser context if provided
-            if self.config.auth_cookie:
-                name, _, value = self.config.auth_cookie.partition("=")
-                context.add_cookies([{
-                    "name":  name.strip(),
-                    "value": value.strip(),
-                    "url":   self.config.target,
-                }])
-                logger.debug(f"Auth cookie injected: {name.strip()}")
+                # Inject auth cookie into the browser context if provided
+                if self.config.auth_cookie:
+                    name, _, value = self.config.auth_cookie.partition("=")
+                    context.add_cookies([{
+                        "name":  name.strip(),
+                        "value": value.strip(),
+                        "url":   self.config.target,
+                    }])
+                    logger.debug(f"Auth cookie injected: {name.strip()}")
 
-            page = context.new_page()
-            self._attach_dialog_handler(page)
+                page = context.new_page()
+                self._attach_dialog_handler(page)
 
-            # Attempt login before crawling if credentials supplied
-            if self.config.username and self.config.password:
-                self._login(page)
+                # Attempt login before crawling if credentials supplied
+                if self.config.username and self.config.password:
+                    self._login(page)
 
-            # Begin recursive crawl
-            self._crawl_page(page, start_url, depth=0)
+                # Begin recursive crawl
+                self._crawl_page(page, start_url, depth=0)
 
-            browser.close()
+                browser.close()
+
+        except Exception as e:
+            msg = str(e).lower()
+            if "executable" in msg or "playwright" in msg or "chromium" in msg:
+                logger.error(
+                    "Playwright browser executable not found — browser crawl skipped. "
+                    "Fix with: playwright install chromium"
+                )
+            else:
+                logger.error(
+                    f"Browser crawl failed: {e} — "
+                    "continuing with HTTP-only results"
+                )
 
         logger.info(f"Browser crawl complete — {len(self.found_urls)} URL(s) discovered")
         return self.found_urls
@@ -177,23 +191,23 @@ class BrowserCrawler:
                 logger.info("No login form found — may already be authenticated")
                 return
 
-            # Fill username — try common field names
+            # Fill username — try common field names in order
             for selector in ["input[name='username']", "input[name='user']",
                              "input[name='email']", "input[type='text']"]:
                 field = page.query_selector(selector)
                 if field:
-                    field.fill(self.config.username)
+                    field.fill(self.config.username, timeout=self.config.browser_timeout)
                     logger.debug(f"Filled username using selector: {selector}")
                     break
 
             # Fill password
-            password_field.fill(self.config.password)
+            password_field.fill(self.config.password, timeout=self.config.browser_timeout)
             logger.debug("Filled password field")
 
-            # Submit — look for a submit button or just press Enter
+            # Submit — look for a submit button or fall back to pressing Enter
             submit = page.query_selector("input[type='submit'], button[type='submit']")
             if submit:
-                submit.click()
+                submit.click(timeout=self.config.browser_timeout)
             else:
                 password_field.press("Enter")
 

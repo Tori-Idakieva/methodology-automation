@@ -10,7 +10,7 @@ The scanner operates in five stages:
 
 1. **Crawl** — Discovers URLs on the target using both HTTP requests and a headless browser, capturing content that requires JavaScript execution or client-side rendering.
 2. **Detect** — Runs built-in vulnerability checks across discovered URLs, injecting payloads and analysing responses for signs of weakness.
-3. **Integrate** — Optionally invokes external Kali Linux tools (sqlmap, Nikto) for deeper, specialised testing of the same targets.
+3. **Integrate** — Optionally invokes external tools (sqlmap, Nikto) for deeper, specialised testing of the same targets.
 4. **Enrich** — Queries the NVD CVE API 2.0 to annotate each finding with its CWE ID, OWASP WSTG reference, related CVE count, and average CVSS score.
 5. **Report** — Writes an HTML report (default) and/or a JSON report, and prints a colour-coded terminal summary.
 
@@ -69,7 +69,10 @@ scanner/
 │   └── summary.py        # Prints a colour-coded terminal summary
 ├── utils/
 │   ├── __init__.py
+│   ├── console.py        # Shared Rich Console instance
 │   ├── logger.py         # Centralised logging (get_logger, configure_from_config)
+│   ├── http.py           # Shared requests.Session factory
+│   ├── url.py            # URL utility functions (normalise, scope check, inject)
 │   └── file_handler.py   # File I/O helpers and screenshot path management
 ├── requirements.txt
 └── README.md
@@ -84,7 +87,161 @@ scanner/
 
 ---
 
-## Installation
+## Running with Docker (recommended)
+
+Docker is the recommended way to run the scanner. The image includes everything needed out of the box — Python, Chromium, **sqlmap**, and **Nikto** — so there is nothing to install manually.
+
+### Build the image
+
+From the project root (the directory containing `Dockerfile`):
+
+```bash
+docker build -t wstg-scanner .
+```
+
+### Run a basic scan
+
+Reports are written inside the container at `/scanner/reports/`. Mount a host directory there to retrieve them after the scan:
+
+```bash
+docker run --rm \
+  -v $(pwd)/reports:/scanner/reports \
+  wstg-scanner \
+  --target http://TARGET \
+  --output reports/scan \
+  --format both
+```
+
+The `--output reports/scan` path is relative to the container's working directory (`/scanner`), so the reports land in `./reports/` on your host machine as `scan.html` and `scan.json`.
+
+### Authenticated scan
+
+```bash
+docker run --rm \
+  -v $(pwd)/reports:/scanner/reports \
+  wstg-scanner \
+  --target http://TARGET \
+  --username admin --password password \
+  --output reports/scan \
+  --format both
+```
+
+### Scan with sqlmap and Nikto
+
+sqlmap and Nikto are already installed in the image — just add the flags:
+
+```bash
+docker run --rm \
+  -v $(pwd)/reports:/scanner/reports \
+  wstg-scanner \
+  --target http://TARGET \
+  --username admin --password password \
+  --use-sqlmap --use-nikto \
+  --output reports/scan \
+  --format both
+```
+
+### Full scan with screenshots
+
+Screenshots are saved inside the container at `/scanner/evidence/`. Mount a second volume to retrieve them:
+
+```bash
+docker run --rm \
+  -v $(pwd)/reports:/scanner/reports \
+  -v $(pwd)/evidence:/scanner/evidence \
+  wstg-scanner \
+  --target http://TARGET \
+  --username admin --password password \
+  --use-sqlmap --use-nikto \
+  --screenshots \
+  --output reports/scan \
+  --format both
+```
+
+### Show help
+
+```bash
+docker run --rm wstg-scanner --help
+```
+
+---
+
+## Scan DVWA with Docker Compose
+
+The `docker-compose.yml` spins up both the scanner and DVWA (plus an optional Juice Shop) together on a shared internal network. The scanner reaches DVWA by its service hostname (`http://dvwa`) without any port exposure needed.
+
+### Before you start
+
+The scanner image must be built locally before Docker Compose can use it — it is not pulled from a registry:
+
+```bash
+docker build -t wstg-scanner .
+```
+
+You only need to do this once (and again if you modify the scanner code).
+
+The DVWA and MySQL images are pulled automatically by Docker Compose on first run — no manual `docker pull` needed.
+
+### Quick start
+
+```bash
+# 1. Start DVWA and its database
+#    Docker pulls ghcr.io/digininja/dvwa and mysql:8.0 automatically
+#    on the first run — this may take a minute.
+docker compose up -d dvwa
+
+# 2. Wait ~30 seconds for the database to initialise, then open:
+#    http://localhost:42001
+#    Log in (admin / password), click "Create / Reset Database",
+#    and set the security level to Low.
+
+# 3. Run the scanner against it
+docker compose run --rm scanner \
+  --target http://dvwa \
+  --username admin \
+  --password password \
+  --format both \
+  --output reports/scan
+```
+
+Reports are written to `./reports/` on your host machine.
+
+### With external tools
+
+```bash
+docker compose run --rm scanner \
+  --target http://dvwa \
+  --username admin \
+  --password password \
+  --use-sqlmap --use-nikto \
+  --format both \
+  --output reports/scan
+```
+
+### Scan Juice Shop (optional profile)
+
+```bash
+# Start Juice Shop
+docker compose --profile juice-shop up -d juice-shop
+
+# Run the scanner against it
+docker compose run --rm scanner \
+  --target http://juice-shop:3000 \
+  --format both \
+  --output reports/scan
+```
+
+### Stop everything
+
+```bash
+docker compose down
+```
+
+---
+
+## Local Installation
+
+Local installation is an alternative to Docker. It requires Python, Chromium, and — if you want sqlmap or Nikto — a Kali Linux environment (or manual installation).
 
 ### 1. Install Python dependencies
 
@@ -95,8 +252,14 @@ pip install -r requirements.txt
 ### 2. Install Playwright and Chromium
 
 ```bash
-pip install playwright
 playwright install chromium
+```
+
+### 3. Install external tools (optional, Kali Linux)
+
+```bash
+sudo apt install sqlmap
+sudo apt install nikto
 ```
 
 ---
@@ -130,6 +293,7 @@ python3 main.py --help
 | `--help` | `-h` | | Print all available options and exit |
 | `--log-level` | | `info` | Logging verbosity: `debug`, `info`, `warning`, `error`, `critical`. Overridden by `--verbose` |
 | `--max-depth` | | `2` | Maximum crawl depth from the starting URL |
+| `--open` | | `False` | Open the report(s) in the default browser when the scan completes |
 | `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |
 | `--password` | | `None` | Password for login — use with `--username` |
 | `--screenshots` | | `False` | Capture browser screenshots as evidence for findings |
@@ -185,11 +349,18 @@ python3 main.py --target http://localhost:8080 \
   --use-sqlmap --use-nikto --format both
 ```
 
+**Open the report automatically when done:**
+```bash
+python3 main.py --target http://localhost:8080 --format html --open
+```
+
 ---
 
 ## External Tool Integrations
 
 Two optional integrations can be enabled at runtime. Both tools degrade gracefully — if they are not installed, the scanner logs a warning and continues without them.
+
+When running via **Docker**, sqlmap and Nikto are already installed in the image. No separate installation is needed — just add `--use-sqlmap` or `--use-nikto` to your `docker run` or `docker compose run` command.
 
 ### sqlmap (`--use-sqlmap`)
 
@@ -197,7 +368,7 @@ Runs [sqlmap](https://sqlmap.org/) against any URLs with query parameters and ag
 
 Findings from sqlmap are tagged `SQL Injection (sqlmap confirmed)` with severity `High` and `source: sqlmap`.
 
-**Installation (Kali Linux):**
+**Installation (local / Kali Linux only — not needed with Docker):**
 ```bash
 sudo apt install sqlmap
 ```
@@ -208,7 +379,7 @@ Runs [Nikto](https://github.com/sullo/nikto) against the root target for web ser
 
 Severity is inferred from the Nikto message text using keyword matching (e.g. "sql injection" → High, "directory listing" → Medium, "header" → Low). Findings are tagged `Nikto Finding` and `source: nikto`.
 
-**Installation (Kali Linux):**
+**Installation (local / Kali Linux only — not needed with Docker):**
 ```bash
 sudo apt install nikto
 ```
@@ -256,25 +427,35 @@ The scanner is designed to be tested locally against intentionally vulnerable ap
 - **DVWA** (Damn Vulnerable Web Application) — `https://github.com/digininja/DVWA`
 - **OWASP Juice Shop** — `https://github.com/juice-shop/juice-shop`
 
-Both can be run locally via Docker. See their respective repositories for setup instructions.
+The easiest way to run them is via Docker Compose — see the [Scan DVWA with Docker Compose](#scan-dvwa-with-docker-compose) section above. Both targets are already configured in `docker-compose.yml`.
 
-**DVWA quick start:**
+Alternatively, to run DVWA standalone:
+
 ```bash
 docker pull ghcr.io/digininja/dvwa
 docker run -d -p 42001:80 ghcr.io/digininja/dvwa
 ```
 
-Then navigate to `http://localhost:42001`, complete the setup, and run:
+Navigate to `http://localhost:42001`, complete the setup, then scan:
+
 ```bash
+# Local
 python3 main.py --target http://localhost:42001 \
   --username admin --password password \
   --format both --screenshots
 
-# With external tools on Kali:
-python3 main.py --target http://localhost:42001 \
+# Docker
+docker run --rm \
+  -v $(pwd)/reports:/scanner/reports \
+  wstg-scanner \
+  --target http://localhost:42001 \
   --username admin --password password \
-  --format both --screenshots --use-sqlmap --use-nikto
+  --use-sqlmap --use-nikto \
+  --format both \
+  --output reports/scan
 ```
+
+> **Note:** When running DVWA via Docker Compose, the scanner reaches it as `http://dvwa` (internal hostname). When running DVWA standalone on your host, use `http://localhost:42001` — but replace `localhost` with `host.docker.internal` if you are running the scanner itself inside Docker.
 
 ---
 
@@ -282,7 +463,7 @@ python3 main.py --target http://localhost:42001 \
 
 ### HTML report (default)
 
-A self-contained styled HTML file written to `<output>.html`. Includes a severity summary card row and a findings table with colour-coded severity badges. Each row includes Severity, Type, URL, Detail, CWE (linked to MITRE), WSTG reference, CVE count (linked to NVD), and Evidence columns — easier to read and share than raw JSON.
+A self-contained styled HTML file written to `<output>.html`. Includes a severity summary card row and a findings table with colour-coded severity badges. Each row includes Severity, Type, URL, Detail, CWE (linked to MITRE), WSTG reference, CVE count (linked to NVD), and Evidence columns.
 
 ### JSON report
 
@@ -313,7 +494,7 @@ A colour-coded table is printed to stdout at the end of the scan showing all fin
 
 ### Evidence directory
 
-When `--screenshots` is enabled, a folder named `evidence/` is created automatically in the working directory. It contains full-page PNG screenshots of crawled pages and any triggered alert dialogs, named by page index or vulnerability label.
+When `--screenshots` is enabled, a folder named `evidence/` is created automatically in the working directory. It contains full-page PNG screenshots of crawled pages and any triggered alert dialogs, named by page index or vulnerability label. When running via Docker, mount `/scanner/evidence` to a host path to retrieve screenshots after the scan.
 
 ---
 
@@ -326,9 +507,9 @@ When `--screenshots` is enabled, a folder named `evidence/` is created automatic
 | `playwright` | Headless browser automation and DOM interaction |
 | `rich` | Formatted terminal output for the summary report |
 
-External tools (optional, not installed via pip):
+External tools (already included in the Docker image — manual installation only needed for local runs):
 
-| Tool | Installation | Flag |
+| Tool | Local Installation | Flag |
 |---|---|---|
 | `sqlmap` | `sudo apt install sqlmap` (Kali) | `--use-sqlmap` |
 | `nikto` | `sudo apt install nikto` (Kali) | `--use-nikto` |

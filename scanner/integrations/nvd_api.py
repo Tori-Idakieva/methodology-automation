@@ -13,7 +13,12 @@ Rate limit:   5 requests / 30 seconds without an API key
 import time
 import requests
 from typing import List, Optional
+from rich.progress import (
+    Progress, SpinnerColumn, BarColumn,
+    TextColumn, MofNCompleteColumn, TimeElapsedColumn,
+)
 from utils.logger import get_logger
+from utils.console import console
 
 logger = get_logger(__name__)
 
@@ -87,44 +92,83 @@ class NVDEnricher:
         """
         Add CWE, OWASP, and NVD CVE data to each finding in-place.
 
+        Applies a static CWE + WSTG mapping first, then queries the NVD
+        CVE API once per unique CWE. A Rich progress bar shows how many
+        CWE lookups remain — each one carries a 6-second rate-limit delay.
+
         Returns the enriched findings list.
         """
-        logger.info("Enriching findings with CWE and NVD CVE data...")
+        if not findings:
+            return findings
 
-        queried_cwes = set()
-
+        # Pre-compute the set of unique CWEs we will need to query so we
+        # can give the progress bar an accurate total upfront.
+        pending_cwes: set = set()
         for finding in findings:
-            finding_type = finding.get("type", "")
-
-            # Apply static CWE + WSTG mapping
-            metadata = self._match_metadata(finding_type)
+            metadata = self._match_metadata(finding.get("type", ""))
             if metadata:
-                finding["cwe_id"]      = metadata["cwe_id"]
-                finding["cwe_name"]    = metadata["cwe_name"]
-                finding["wstg_ref"]    = metadata["wstg_ref"]
-                finding["owasp_top10"] = metadata["owasp_top10"]
-                finding["nvd_url"]     = f"https://nvd.nist.gov/vuln/search/results?form_type=Advanced&cwe_id={metadata['cwe_id']}"
+                pending_cwes.add(metadata["cwe_id"])
 
-                # Query NVD API once per unique CWE
-                cwe_id = metadata["cwe_id"]
-                if cwe_id not in queried_cwes:
-                    nvd_data = self._fetch_nvd(cwe_id)
-                    self._cve_cache[cwe_id] = nvd_data
-                    queried_cwes.add(cwe_id)
-                    if len(queried_cwes) > 1:
-                        time.sleep(REQUEST_DELAY)   # respect rate limit
+        logger.info(
+            f"Enriching {len(findings)} finding(s) — "
+            f"{len(pending_cwes)} unique CWE(s) to query"
+        )
 
-                nvd_data = self._cve_cache.get(cwe_id, {})
-                finding["cve_count"]       = nvd_data.get("cve_count", "N/A")
-                finding["cvss_avg"]        = nvd_data.get("cvss_avg", "N/A")
-                finding["sample_cve"]      = nvd_data.get("sample_cve", "N/A")
-                finding["sample_cve_url"]  = nvd_data.get("sample_cve_url", "")
-            else:
-                # Fallback for unmapped finding types
-                finding["cwe_id"]     = "N/A"
-                finding["wstg_ref"]   = "N/A"
-                finding["cve_count"]  = "N/A"
-                finding["cvss_avg"]   = "N/A"
+        queried_cwes: set = set()
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            console=console,
+            transient=True,   # clear bar when done so the terminal stays clean
+        ) as progress:
+            task = progress.add_task(
+                "Querying NVD CVE API...",
+                total=len(pending_cwes) if pending_cwes else 1,
+            )
+
+            for finding in findings:
+                finding_type = finding.get("type", "")
+                metadata = self._match_metadata(finding_type)
+
+                if metadata:
+                    # Apply static CWE + WSTG fields
+                    finding["cwe_id"]      = metadata["cwe_id"]
+                    finding["cwe_name"]    = metadata["cwe_name"]
+                    finding["wstg_ref"]    = metadata["wstg_ref"]
+                    finding["owasp_top10"] = metadata["owasp_top10"]
+                    finding["nvd_url"]     = (
+                        "https://nvd.nist.gov/vuln/search/results"
+                        f"?form_type=Advanced&cwe_id={metadata['cwe_id']}"
+                    )
+
+                    cwe_id = metadata["cwe_id"]
+
+                    # Query NVD API once per unique CWE, then reuse the cache
+                    if cwe_id not in queried_cwes:
+                        progress.update(task, description=f"NVD API — {cwe_id}")
+                        if queried_cwes:
+                            time.sleep(REQUEST_DELAY)   # respect rate limit
+                        nvd_data = self._fetch_nvd(cwe_id)
+                        self._cve_cache[cwe_id] = nvd_data
+                        queried_cwes.add(cwe_id)
+                        progress.advance(task)
+
+                    nvd_data = self._cve_cache.get(cwe_id, {})
+                    finding["cve_count"]      = nvd_data.get("cve_count",      "N/A")
+                    finding["cvss_avg"]       = nvd_data.get("cvss_avg",       "N/A")
+                    finding["sample_cve"]     = nvd_data.get("sample_cve",     "N/A")
+                    finding["sample_cve_url"] = nvd_data.get("sample_cve_url", "")
+
+                else:
+                    # Unmapped finding type — set safe fallback values
+                    finding["cwe_id"]     = "N/A"
+                    finding["wstg_ref"]   = "N/A"
+                    finding["cve_count"]  = "N/A"
+                    finding["cvss_avg"]   = "N/A"
 
         logger.info("NVD enrichment complete")
         return findings

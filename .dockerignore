@@ -1,0 +1,36 @@
+# ── Python artifacts ─────────────────────────────────────────────────
+**/__pycache__/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+*.egg-info/
+.eggs/
+
+# ── Scanner runtime outputs ───────────────────────────────────────────
+# These are generated at runtime and should not be baked into the image.
+scanner/evidence/
+scanner/reports/
+scanner/*.html
+scanner/*.json
+
+# ── Git / version control ─────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Editor and OS files ───────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Documentation ─────────────────────────────────────────────────────
+*.md
+
+# ── Docker files themselves ───────────────────────────────────────────
+# No need to copy these into the image.
+Dockerfile
+docker-compose.yml
+.dockerignore

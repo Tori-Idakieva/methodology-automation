@@ -1,0 +1,103 @@
+# ============================================================
+# OWASP WSTG Security Scanner — Docker Compose
+# ============================================================
+#
+# Quick start with DVWA:
+#
+#   1. Start DVWA:
+#        docker compose up -d dvwa
+#
+#   2. Open http://localhost:42001, log in (admin/password),
+#      click "Create / Reset Database", set security to Low.
+#
+#   3. Run the scanner:
+#        docker compose run --rm scanner \
+#          --target http://dvwa \
+#          --username admin \
+#          --password password \
+#          --format both \
+#          --output reports/scan
+#
+#   Reports land in ./reports/ on your host machine.
+#
+# Quick start with Juice Shop (add --profile juice-shop):
+#
+#   docker compose --profile juice-shop up -d juice-shop
+#   docker compose run --rm scanner \
+#     --target http://juice-shop:3000 \
+#     --format both \
+#     --output reports/scan
+#
+# ============================================================
+
+services:
+
+  # ── Scanner ──────────────────────────────────────────────────────────
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wstg-scanner
+    volumes:
+      # Reports written to /scanner/reports in the container are
+      # accessible at ./reports/ on the host after the scan completes.
+      - ./reports:/scanner/reports
+    networks:
+      - scan-net
+    # Default shows --help. Override at runtime with your scan arguments:
+    #   docker compose run --rm scanner --target http://dvwa ...
+    command: ["--help"]
+
+  # ── DVWA (Damn Vulnerable Web Application) ───────────────────────────
+  dvwa:
+    image: ghcr.io/digininja/dvwa:latest
+    ports:
+      - "42001:80"       # http://localhost:42001
+    environment:
+      DB_SERVER: dvwa-db
+      RECAPTCHA_PRIV_KEY: ""
+      RECAPTCHA_PUB_KEY: ""
+    depends_on:
+      dvwa-db:
+        condition: service_healthy
+    networks:
+      - scan-net
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost/login.php"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  dvwa-db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: dvwa
+      MYSQL_DATABASE: dvwa
+      MYSQL_USER: dvwa
+      MYSQL_PASSWORD: p@ssw0rd
+    networks:
+      - scan-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── OWASP Juice Shop (optional test target) ───────────────────────────
+  # Enable with: docker compose --profile juice-shop up -d juice-shop
+  juice-shop:
+    image: bkimminich/juice-shop:latest
+    ports:
+      - "3000:3000"      # http://localhost:3000
+    networks:
+      - scan-net
+    profiles:
+      - juice-shop
+
+# ── Shared network ────────────────────────────────────────────────────
+# All services share this bridge network so the scanner can reach
+# DVWA and Juice Shop by their service names as hostnames.
+networks:
+  scan-net:
+    driver: bridge

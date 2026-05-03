@@ -42,32 +42,48 @@ class XSSDetector:
         """
         findings = []
 
-        # Launch a single browser instance shared across all probes
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=self.config.headless)
-            context = browser.new_context()
+        # Launch a single browser instance shared across all probes.
+        # Wrapping in try/except ensures a missing Playwright installation or
+        # any browser-level crash degrades gracefully rather than aborting the scan.
+        try:
+            with sync_playwright() as pw:
+                browser = pw.chromium.launch(headless=self.config.headless)
+                context = browser.new_context()
 
-            # Inject auth cookie into browser context if provided
-            if self.config.auth_cookie:
-                name, _, value = self.config.auth_cookie.partition("=")
-                context.add_cookies([{
-                    "name":  name.strip(),
-                    "value": value.strip(),
-                    "url":   self.config.target,
-                }])
+                # Inject auth cookie into browser context if provided
+                if self.config.auth_cookie:
+                    name, _, value = self.config.auth_cookie.partition("=")
+                    context.add_cookies([{
+                        "name":  name.strip(),
+                        "value": value.strip(),
+                        "url":   self.config.target,
+                    }])
 
-            page = context.new_page()
+                page = context.new_page()
 
-            # Test URL parameters
-            for url in urls:
-                if "?" in url:
-                    findings.extend(self._test_url(url, page))
+                # Test URL parameters
+                for url in urls:
+                    if "?" in url:
+                        findings.extend(self._test_url(url, page))
 
-            # Test form injection vectors
-            for form in self.forms:
-                findings.extend(self._test_form(form, page))
+                # Test form injection vectors
+                for form in self.forms:
+                    findings.extend(self._test_form(form, page))
 
-            browser.close()
+                browser.close()
+
+        except Exception as e:
+            msg = str(e).lower()
+            if "executable" in msg or "playwright" in msg or "chromium" in msg:
+                logger.error(
+                    "Playwright browser executable not found — XSS browser checks skipped. "
+                    "Fix with: playwright install chromium"
+                )
+            else:
+                logger.error(
+                    f"XSS detector browser session failed: {e} — "
+                    "browser-based checks skipped"
+                )
 
         return findings
 
@@ -144,23 +160,29 @@ class XSSDetector:
                         wait_until="domcontentloaded",
                     )
 
-                    # Fill all fields, inject payload into target field
+                    # Fill all fields, inject payload into the target field
                     for input_name in inputs:
                         locator = page.locator(f"[name='{input_name}']")
                         if locator.count() > 0:
                             value = payload if input_name == field else "test"
                             try:
-                                locator.first.fill(value)
-                            except Exception:
-                                pass
+                                locator.first.fill(
+                                    value,
+                                    timeout=self.config.browser_timeout,
+                                )
+                            except Exception as e:
+                                logger.debug(
+                                    f"Could not fill field '{input_name}' "
+                                    f"on {action}: {e}"
+                                )
 
                     # Submit the form
                     submit = page.locator("input[type='submit'], button[type='submit']")
                     if submit.count() > 0:
-                        submit.first.click()
+                        submit.first.click(timeout=self.config.browser_timeout)
                         page.wait_for_load_state(
                             "domcontentloaded",
-                            timeout=self.config.browser_timeout
+                            timeout=self.config.browser_timeout,
                         )
 
                 except Exception as e:

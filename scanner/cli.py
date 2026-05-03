@@ -32,6 +32,12 @@ def parse_args() -> argparse.Namespace:
         help="Playwright navigation timeout in milliseconds (default: 15000)",
     )
     parser.add_argument(
+        "--open",
+        action="store_true",
+        default=False,
+        help="Automatically open the report(s) in the default viewer after scanning",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         default=True,
