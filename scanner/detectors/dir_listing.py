@@ -9,7 +9,7 @@ Strategy:
   3. Flag exposed directories as Medium severity findings.
 """
 
-from typing import List
+from typing import List, Optional
 from config import ScannerConfig
 from payloads import DIR_LISTING_SIGNATURES
 from utils.logger import get_logger
@@ -47,7 +47,7 @@ class DirectoryListingDetector:
         #   - for each origin × COMMON_DIRS: call _probe_directory()
         raise NotImplementedError
 
-    def _probe_directory(self, url: str) -> dict | None:
+    def _probe_directory(self, url: str) -> Optional[dict]:
         """
         GET the directory URL and check response body for listing signatures.
 

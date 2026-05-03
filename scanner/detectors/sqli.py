@@ -10,7 +10,7 @@ Strategy:
   4. Log payloads and response snippets as evidence.
 """
 
-from typing import List
+from typing import List, Optional
 from config import ScannerConfig
 from payloads import SQLI_PAYLOADS, SQLI_ERROR_SIGNATURES
 from utils.logger import get_logger
@@ -43,7 +43,7 @@ class SQLiDetector:
         #   - call _error_based_probe() and _boolean_probe()
         raise NotImplementedError
 
-    def _error_based_probe(self, url: str, payload: str) -> dict | None:
+    def _error_based_probe(self, url: str, payload: str) -> Optional[dict]:
         """
         Send injected request and scan response for DB error signatures.
 
@@ -54,7 +54,7 @@ class SQLiDetector:
         #   - check response.text.lower() against SQLI_ERROR_SIGNATURES
         raise NotImplementedError
 
-    def _boolean_probe(self, url: str, param: str, payload: str) -> dict | None:
+    def _boolean_probe(self, url: str, param: str, payload: str) -> Optional[dict]:
         """
         Compare baseline response with injected response to detect
         boolean-based blind SQLi via content-length or body differences.

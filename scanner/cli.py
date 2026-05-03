@@ -20,6 +20,18 @@ def parse_args() -> argparse.Namespace:
         help="Session cookie to include in requests (e.g. 'PHPSESSID=abc123'). Optional.",
     )
     parser.add_argument(
+        "--format",
+        choices=["json", "html", "both"],
+        default="html",
+        help="Output report format: json, html, or both (default: html)",
+    )
+    parser.add_argument(
+        "--browser-timeout",
+        type=int,
+        default=15000,
+        help="Playwright navigation timeout in milliseconds (default: 15000)",
+    )
+    parser.add_argument(
         "--headless",
         action="store_true",
         default=True,
@@ -33,8 +45,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-o", "--output",
-        default="report.json",
-        help="Output file path for the JSON report (default: report.json)",
+        default="report",
+        help="Output file base name, without extension (default: report). Extension is added automatically based on --format.",
     )
     parser.add_argument(
         "--password",

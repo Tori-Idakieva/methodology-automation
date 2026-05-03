@@ -11,7 +11,7 @@ Strategy:
   4. Capture a screenshot as evidence on confirmed hits.
 """
 
-from typing import List
+from typing import List, Optional
 from config import ScannerConfig
 from payloads import XSS_PAYLOADS
 from utils.logger import get_logger
@@ -49,7 +49,7 @@ class XSSDetector:
         # TODO: requests.get(url), check payload in response.text
         raise NotImplementedError
 
-    def _browser_probe(self, url: str, payload: str) -> dict | None:
+    def _browser_probe(self, url: str, payload: str) -> Optional[dict]:
         """
         Navigate to URL in Playwright and detect alert dialogs or DOM injection.
 

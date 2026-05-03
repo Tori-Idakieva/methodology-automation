@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 
 def main():
     args = parse_args()
-    config = ScannerConfig(target=args.target, output=args.output)
+    config = ScannerConfig.from_args(args)
 
     logger.info(f"Starting scan against: {config.target}")
 
