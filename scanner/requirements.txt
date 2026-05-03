@@ -1,0 +1,12 @@
+# Core HTTP
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Browser automation
+playwright>=1.44.0
+
+# Reporting
+rich>=13.7.0          # pretty terminal summary output
+
+# Utilities
+urllib3>=2.2.0
