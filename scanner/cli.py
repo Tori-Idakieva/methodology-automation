@@ -5,6 +5,7 @@ Parses user-supplied arguments (target URL, output path, scan options).
 """
 
 import argparse
+from argparse import BooleanOptionalAction
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,9 +40,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--headless",
-        action="store_true",
+        action=BooleanOptionalAction,
         default=True,
-        help="Run Playwright in headless mode (default: True)",
+        help="Run Playwright in headless mode (default: True). Use --no-headless to show the browser window.",
     )
     parser.add_argument(
         "--log-level",

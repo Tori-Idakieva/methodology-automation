@@ -13,7 +13,7 @@ Strategy:
 """
 
 import requests
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urljoin
 from typing import List, Optional
 from config import ScannerConfig
 from payloads import SQLI_PAYLOADS, SQLI_ERROR_SIGNATURES
@@ -140,8 +140,7 @@ class SQLiDetector:
         # Skip forms whose action URL looks like a command-injection endpoint.
         # These don't query a SQL database and will timeout waiting for the OS
         # to process injected shell syntax (e.g. DVWA's exec/ endpoint).
-        from urllib.parse import urlparse as _up
-        _path_parts = set(_up(action).path.strip("/").split("/"))
+        _path_parts = set(urlparse(action).path.strip("/").split("/"))
         if _path_parts & self._CMD_INJECTION_PATHS:
             logger.debug(f"SQLi: skipping command-injection-like form: {action}")
             return findings

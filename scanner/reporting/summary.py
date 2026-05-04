@@ -5,18 +5,16 @@ Uses the `rich` library to print a colour-coded findings table and
 severity breakdown to stdout at the end of a scan.
 """
 
-from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 from rich import box
 from typing import List
 from config import ScannerConfig
 from utils.logger import get_logger
+from utils.console import console
 from reporting import severity_counts, SEVERITY_ORDER
 
 logger = get_logger(__name__)
-
-console = Console()
 
 # Map severity to rich colour names
 SEVERITY_STYLES = {

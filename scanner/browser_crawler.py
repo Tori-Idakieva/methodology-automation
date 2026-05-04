@@ -9,6 +9,7 @@ Also handles login, form extraction, screenshot capture, and dialog detection.
 import time
 from playwright.sync_api import sync_playwright, Page, Dialog
 from typing import List, Optional
+from urllib.parse import urlparse
 from config import ScannerConfig
 from utils.logger import get_logger
 from utils.file_handler import screenshot_path, ensure_evidence_dir
@@ -206,8 +207,7 @@ class BrowserCrawler:
             return
 
         # Skip any URL that would log the browser out and invalidate the session
-        from urllib.parse import urlparse as _urlparse
-        _path = _urlparse(url).path.lower()
+        _path = urlparse(url).path.lower()
         if any(pat in _path for pat in _LOGOUT_PATTERNS):
             logger.debug(f"Skipping logout URL to preserve session: {url}")
             self.visited.add(url)  # mark visited so we don't re-evaluate

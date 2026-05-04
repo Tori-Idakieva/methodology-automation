@@ -313,7 +313,7 @@ python3 main.py --help
 | `--auth-cookie` | | `None` | Session cookie to attach to requests (e.g. `PHPSESSID=abc123`) |
 | `--browser-timeout` | | `15000` | Playwright navigation timeout in milliseconds |
 | `--format` | | `html` | Report output format: `json`, `html`, or `both` |
-| `--headless` | | `True` | Run Playwright in headless mode |
+| `--headless` / `--no-headless` | | `True` | Run Playwright in headless mode (default). Pass `--no-headless` to show the browser window. |
 | `--help` | `-h` | | Print all available options and exit |
 | `--log-level` | | `info` | Logging verbosity: `debug`, `info`, `warning`, `error`, `critical`. Overridden by `--verbose` |
 | `--max-depth` | | `2` | Maximum crawl depth from the starting URL |
