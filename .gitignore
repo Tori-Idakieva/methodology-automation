@@ -27,8 +27,8 @@ Thumbs.db
 # Scanner outputs — reports and screenshots may contain session tokens,
 # injected payloads, and target-specific vulnerability details.
 # Never commit these to version control.
-reports/
-evidence/
+scanner/reports/
+scanner/evidence/
 *.log
 
 # sqlmap session data written to the home directory during runs

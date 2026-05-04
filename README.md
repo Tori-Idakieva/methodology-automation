@@ -33,7 +33,7 @@ The scanner supports two authentication methods:
 
 ### Evidence
 
-When `--screenshots` is enabled, the browser crawler saves a full-page screenshot of every crawled page and any triggered alert dialogs to an `evidence/` directory created automatically in the working directory. Screenshots are timestamped so successive scans never overwrite each other.
+When `--screenshots` is enabled, the browser crawler saves a full-page screenshot of every crawled page and any triggered alert dialogs to `scanner/evidence/`. Screenshots are timestamped so successive scans never overwrite each other.
 
 ---
 
@@ -130,7 +130,7 @@ docker compose run --rm scanner \
   --report-base-url http://localhost:42001
 ```
 
-`--report-base-url` rewrites internal Docker hostnames (`http://dvwa`) to browser-accessible URLs (`http://localhost:42001`) in the HTML report so every finding link is clickable. Reports are written to `./reports/` on your host with an auto-generated timestamped filename (e.g. `scan-20260506-153042.html`).
+`--report-base-url` rewrites internal Docker hostnames (`http://dvwa`) to browser-accessible URLs (`http://localhost:42001`) in the HTML report so every finding link is clickable. Reports are written to `scanner/reports/` with an auto-generated timestamped filename (e.g. `scan-20260506-153042.html`).
 
 ### Step 4 — Run with all tools (optional)
 
@@ -147,7 +147,7 @@ docker compose run --rm scanner \
   --report-base-url http://localhost:42001
 ```
 
-Screenshots land in `./evidence/` on your host.
+Screenshots land in `scanner/evidence/`.
 
 ### Step 5 — Stop everything
 
@@ -176,7 +176,7 @@ docker compose run --rm scanner \
   --format both
 ```
 
-Reports are written to `./reports/` on your host. A timestamp is always appended to the filename — if you pass `--output myscan` the file is `myscan-20260506-153042.html`; with no `--output` it defaults to `scan-20260506-153042.html`. Successive scans never overwrite each other.
+Reports are written to `scanner/reports/`. A timestamp is always appended to the filename — if you pass `--output myscan` the file is `myscan-20260506-153042.html`; with no `--output` it defaults to `scan-20260506-153042.html`. Successive scans never overwrite each other.
 
 ---
 
@@ -334,7 +334,7 @@ A structured JSON file (`<output>.json`) for machine-readable output or import i
 
 ### Evidence directory
 
-When `--screenshots` is enabled, `evidence/` is created automatically in the working directory (or at `/scanner/evidence` in the container). It contains full-page PNGs of crawled pages and any XSS alert dialogs.
+When `--screenshots` is enabled, `scanner/evidence/` is created automatically. It contains full-page PNGs of crawled pages and any XSS alert dialogs, each timestamped to match its scan run.
 
 ---
 

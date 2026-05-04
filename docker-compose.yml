@@ -13,7 +13,7 @@
 #          --username admin \
 #          --password password \
 #          --format both \
-#          --output reports/scan
+#          --report-base-url http://localhost:42001
 #
 #   Reports land in ./reports/ on your host machine.
 #
@@ -31,10 +31,8 @@ services:
       # Live bind-mount of the scanner source so code changes are picked up
       # immediately without rebuilding the image. The image still provides all
       # system deps and pip packages — only the Python source is overridden.
+      # Reports land in scanner/reports/ and screenshots in scanner/evidence/.
       - ./scanner:/scanner
-      # Reports are written to ./reports/ on the host. This mount shadows the
-      # scanner sub-directory so reports land outside the source tree.
-      - ./reports:/scanner/reports
     networks:
       - scan-net
     # Default shows --help. Override at runtime with your scan arguments:

@@ -1,9 +1,10 @@
 # ============================================================
 # OWASP WSTG Security Scanner — Dockerfile
 # ============================================================
-# Build:  docker build -t wstg-scanner .
-# Run:    docker run --rm -v $(pwd)/reports:/scanner/reports \
-#           wstg-scanner --target http://TARGET --output reports/scan
+# Build:  docker compose build scanner
+# Run:    docker compose run --rm scanner --target http://TARGET
+#
+# Reports → scanner/reports/   Evidence → scanner/evidence/
 # ============================================================
 
 FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
@@ -68,22 +69,9 @@ RUN useradd -m -u 1001 scanner \
 
 USER scanner
 
-# ── Reports output directory ──────────────────────────────────────────
-# Mount a host directory here to retrieve reports after the scan:
-#   -v $(pwd)/reports:/scanner/reports
-# Pass --output reports/scan to write reports into this directory.
-RUN mkdir -p /scanner/reports
-
-VOLUME ["/scanner/reports"]
-
 # ── Entry point ───────────────────────────────────────────────────────
 # ENTRYPOINT makes the container behave like a binary.
 # CMD provides the default argument — shows help when run with no args.
-# Any arguments passed to `docker run` override CMD entirely.
-#
-# Examples:
-#   docker run wstg-scanner --help
-#   docker run -v $(pwd)/reports:/scanner/reports wstg-scanner \
-#     --target http://dvwa --output reports/scan --format both
+# Any arguments passed to `docker compose run` override CMD entirely.
 ENTRYPOINT ["python3", "main.py"]
 CMD ["--help"]
