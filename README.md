@@ -16,16 +16,24 @@ The scanner operates in five stages:
 
 ### Two-crawler approach
 
-The **HTTP crawler** (`http_crawler.py`) uses `requests` and `BeautifulSoup` to fetch pages and extract links without executing JavaScript — fast and lightweight.
+The scanner runs two crawlers in sequence and merges their results before detection begins.
 
-The **browser crawler** (`browser_crawler.py`) uses Playwright to navigate in a real headless browser. It executes JavaScript, handles client-side routing, submits login forms, captures screenshots, and listens for `alert`/`confirm`/`prompt` dialogs as XSS confirmation signals.
+The **HTTP crawler** (`http_crawler.py`) uses `requests` and `BeautifulSoup` to fetch pages and extract links without executing JavaScript. It is fast and lightweight, and handles redirect scope checks, auth cookie injection, and form discovery from raw HTML.
 
-Both crawlers produce a merged list of URLs and form injection vectors that the detectors consume.
+The **browser crawler** (`browser_crawler.py`) uses Playwright to navigate pages in a real headless Chromium browser. It executes JavaScript, handles client-side routing, and can interact with dynamic content. It also handles login form submission if credentials are provided, captures screenshots as evidence, and listens for browser dialog events (`alert`, `confirm`, `prompt`) which are used as XSS confirmation signals.
+
+Both crawlers produce a list of discovered URLs and a list of form injection vectors (action URL, method, input field names) that the detectors consume directly.
 
 ### Authentication
 
-- **Credentials** (`--username` / `--password`) — the browser crawler detects and submits the login form before crawling.
-- **Session cookie** (`--auth-cookie`) — injects a pre-existing cookie into both the HTTP session and the browser context, bypassing login entirely.
+The scanner supports two authentication methods:
+
+- **Credentials** (`--username` / `--password`) — the browser crawler navigates to the target, detects the login form, fills in the credentials and submits before crawling begins. Field detection is generic and does not hardcode field names.
+- **Session cookie** (`--auth-cookie`) — injects a pre-existing session cookie into both the HTTP session and the browser context, bypassing the login step entirely.
+
+### Evidence
+
+When `--screenshots` is enabled, the browser crawler saves a full-page screenshot of every crawled page and any triggered alert dialogs to an `evidence/` directory created automatically in the working directory. Screenshots are timestamped so successive scans never overwrite each other.
 
 ---
 
@@ -44,19 +52,30 @@ scanner/
   browser_crawler.py    # Playwright browser crawler
   payloads.py           # Injection payload and signature library
   detectors/
+    __init__.py         # Shared finding dict schema
     xss.py              # XSS detector (WSTG-INPV-01)
     sqli.py             # SQL Injection detector (WSTG-INPV-05)
     headers.py          # Security header analyser (WSTG-CONF-07)
     dir_listing.py      # Directory listing detector (WSTG-CONF-04)
   integrations/
+    __init__.py
     nvd_api.py          # NVD CVE API 2.0 enrichment
     sqlmap_runner.py    # sqlmap subprocess wrapper (--use-sqlmap)
     nikto_runner.py     # Nikto subprocess wrapper (--use-nikto)
   reporting/
+    __init__.py
     html_report.py      # Styled self-contained HTML report
     json_report.py      # Machine-readable JSON report
     summary.py          # Colour-coded terminal summary
-  utils/                # Shared helpers: HTTP session, URL utils, logging
+  utils/
+    __init__.py
+    browser.py          # Shared Playwright cookie injection helper
+    console.py          # Shared Rich Console instance
+    file_handler.py     # File I/O helpers and screenshot path management
+    http.py             # Shared requests.Session factory
+    logger.py           # Centralised logging (get_logger, configure_from_config)
+    proc.py             # Shared subprocess streaming (sqlmap, Nikto)
+    url.py              # URL utility functions (normalise, scope check, inject)
   requirements.txt
 ```
 
@@ -163,13 +182,13 @@ Reports are written to `./reports/` on your host. A timestamp is always appended
 
 ## Local Installation (alternative to Docker)
 
-All commands below are run from the `scanner/` directory. Docker is recommended for Windows and macOS — local install is simplest on Linux and Kali.
+All commands below are run from the `scanner/` directory. Local install is supported on Linux, Kali, and macOS. **Windows users should use Docker** — see the [Quick Start with Docker Compose](#quick-start-with-docker-compose) section above.
 
 ### Step 1 — Install Python dependencies
 
 ```bash
 cd scanner
-pip install -r requirements.txt      # Linux / macOS / Windows
+pip install -r requirements.txt      # Linux / macOS
 ```
 
 > **Kali Linux note:** If pip refuses to install outside a virtual environment, add `--break-system-packages`:
@@ -184,8 +203,6 @@ playwright install chromium
 playwright install-deps chromium     # Linux only — installs OS-level browser deps
 ```
 
-On Windows you can skip `install-deps`; Playwright manages its own browser binaries.
-
 ### Step 3 — Install external tools (optional)
 
 | Platform | sqlmap | Nikto |
@@ -193,7 +210,6 @@ On Windows you can skip `install-deps`; Playwright manages its own browser binar
 | **Kali Linux** | Pre-installed (or `sudo apt install sqlmap`) | Pre-installed (or `sudo apt install nikto`) |
 | **Ubuntu / Debian** | `sudo apt install sqlmap` | `sudo apt install nikto` |
 | **macOS** | `brew install sqlmap` | `brew install nikto` |
-| **Windows** | `pip install sqlmap` | Manual — download from [github.com/sullo/nikto](https://github.com/sullo/nikto), requires Perl. Recommended to use WSL2 instead. |
 
 ### Step 4 — Run a scan
 
@@ -201,11 +217,6 @@ On Windows you can skip `install-deps`; Playwright manages its own browser binar
 python3 main.py --target http://localhost:42001 \
   --username admin --password password \
   --format both
-```
-
-On Windows (native, not WSL):
-```
-python main.py --target http://localhost:42001 --username admin --password password
 ```
 
 ### Platform notes
@@ -216,7 +227,7 @@ python main.py --target http://localhost:42001 --username admin --password passw
 
 **Kali Linux:** sqlmap and Nikto are typically pre-installed. Run `playwright install chromium && playwright install-deps chromium` to add Playwright's Chromium. Kali uses a newer Python packaging policy, so add `--break-system-packages` to pip if prompted.
 
-**Windows:** The scanner runs on Windows natively but sqlmap and Nikto are harder to install without package manager support. **WSL2 (Windows Subsystem for Linux) is strongly recommended** — follow the Linux instructions above inside a WSL2 Ubuntu terminal, then run DVWA via Docker Desktop with WSL2 integration enabled.
+**Windows:** Use Docker — see the [Quick Start with Docker Compose](#quick-start-with-docker-compose) section above. sqlmap and Nikto are pre-installed in the image, so no local setup is needed.
 
 ---
 
@@ -338,6 +349,7 @@ Every finding is automatically enriched with data from the [NVD CVE API 2.0](htt
 | `wstg_ref` | OWASP WSTG reference (e.g. `WSTG-INPV-01`) |
 | `owasp_top10` | OWASP Top 10 2021 category |
 | `cve_count` | Total NVD CVEs linked to the CWE |
+| `cvss_avg` | Average CVSS base score of the most recent CVEs |
 | `sample_cve` | Most recent relevant CVE ID |
 | `nvd_url` | Link to NVD search results for the CWE |
 
