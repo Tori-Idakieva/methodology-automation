@@ -8,6 +8,7 @@ Provides safe write wrappers and evidence directory management
 import os
 import json
 import webbrowser
+from typing import Any
 from utils.logger import get_logger
 
 logger = get_logger(__name__)

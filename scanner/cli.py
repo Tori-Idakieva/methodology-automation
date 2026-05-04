@@ -77,6 +77,20 @@ def parse_args() -> argparse.Namespace:
         help="Target base URL to scan (e.g. http://localhost:8080)",
     )
     parser.add_argument(
+        "--report-base-url",
+        default=None,
+        dest="report_base_url",
+        help=(
+            "Public-facing base URL to substitute into report links. "
+            "Only needed when the scanner reaches the target via an internal address "
+            "that differs from what a browser would use — most commonly a Docker "
+            "service hostname. Example: --target http://dvwa scans via Docker's "
+            "internal network, but --report-base-url http://localhost:42001 makes "
+            "every link in the HTML report clickable from your browser. "
+            "Defaults to --target (no substitution)."
+        ),
+    )
+    parser.add_argument(
         "--use-nikto",
         action="store_true",
         default=False,

@@ -30,8 +30,19 @@ def build_session(config: ScannerConfig) -> requests.Session:
     session.headers.update(config.default_headers)
 
     if config.auth_cookie:
-        name, _, value = config.auth_cookie.partition("=")
-        session.cookies.set(name.strip(), value.strip())
-        logger.debug(f"Auth cookie applied to session: {name.strip()}")
+        # auth_cookie may be a single "name=value" string or a
+        # semicolon-separated list "PHPSESSID=abc; security=low"
+        # (the latter is produced when the browser crawler captures
+        # multiple cookies to propagate to HTTP-based detectors).
+        for part in config.auth_cookie.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            name, _, value = part.partition("=")
+            name  = name.strip()
+            value = value.strip()
+            if name:
+                session.cookies.set(name, value)
+                logger.debug(f"Auth cookie applied to session: {name}")
 
     return session

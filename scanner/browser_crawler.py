@@ -6,6 +6,7 @@ JavaScript-rendered content and client-side routing to be captured.
 Also handles login, form extraction, screenshot capture, and dialog detection.
 """
 
+import time
 from playwright.sync_api import sync_playwright, Page, Dialog
 from typing import List, Optional
 from config import ScannerConfig
@@ -14,6 +15,10 @@ from utils.file_handler import screenshot_path, ensure_evidence_dir
 from utils.url import normalise_url, in_scope
 
 logger = get_logger(__name__)
+
+# URL path segments that would invalidate the current session.
+# Any URL whose path contains one of these strings is skipped during crawling.
+_LOGOUT_PATTERNS = ("logout", "signout", "sign-out", "log-out", "logoff", "log_off")
 
 
 class BrowserCrawler:
@@ -25,6 +30,7 @@ class BrowserCrawler:
         self.found_urls: List[str] = []
         self.forms: List[dict] = []         # discovered form injection vectors
         self.dialogs_triggered: List[dict] = []  # captured alert/confirm/prompt events
+        self.session_cookie: Optional[str] = None  # captured after login for use by detectors
 
     # ------------------------------------------------------------------
     # Public API
@@ -43,15 +49,21 @@ class BrowserCrawler:
                 browser = pw.chromium.launch(headless=self.config.headless)
                 context = browser.new_context()
 
-                # Inject auth cookie into the browser context if provided
+                # Inject auth cookie(s) into the browser context if provided.
+                # Handles both single "name=value" and "name1=v1; name2=v2".
                 if self.config.auth_cookie:
-                    name, _, value = self.config.auth_cookie.partition("=")
-                    context.add_cookies([{
-                        "name":  name.strip(),
-                        "value": value.strip(),
-                        "url":   self.config.target,
-                    }])
-                    logger.debug(f"Auth cookie injected: {name.strip()}")
+                    entries = []
+                    for part in self.config.auth_cookie.split(";"):
+                        part = part.strip()
+                        if not part:
+                            continue
+                        n, _, v = part.partition("=")
+                        n = n.strip(); v = v.strip()
+                        if n:
+                            entries.append({"name": n, "value": v, "url": self.config.target})
+                    if entries:
+                        context.add_cookies(entries)
+                        logger.debug(f"Auth cookie(s) injected: {len(entries)} cookie(s)")
 
                 page = context.new_page()
                 self._attach_dialog_handler(page)
@@ -59,9 +71,74 @@ class BrowserCrawler:
                 # Attempt login before crawling if credentials supplied
                 if self.config.username and self.config.password:
                     self._login(page)
+                    # After login the browser has landed on the authenticated
+                    # landing page (e.g. index.php). Start crawling from there
+                    # rather than re-navigating to the root URL, which would
+                    # trigger a redirect back to login.php and lose the context.
+                    start_url = page.url or start_url
+
+                    # ── Case 1: login redirected to setup.php ─────────────────
+                    # The admin user exists (login worked) but the application
+                    # database tables haven't been created yet.
+                    if "setup.php" in start_url:
+                        logger.warning(
+                            "Login redirected to setup.php — "
+                            "attempting automatic database initialisation."
+                        )
+                        self._run_setup(page)
+                        self._login(page, _retries=1)
+                        start_url = page.url or start_url
+
+                    # ── Case 2: login failed entirely (still on login page) ───
+                    # The admin user may not exist yet (database not initialised
+                    # at all). Navigate directly to setup.php, create the DB,
+                    # then try logging in again.
+                    elif "login" in start_url.lower():
+                        logger.warning(
+                            "Login failed — navigating to setup.php to "
+                            "attempt automatic database initialisation."
+                        )
+                        setup_url = self.config.target.rstrip("/") + "/setup.php"
+                        if self._goto(page, setup_url):
+                            self._run_setup(page)
+                            time.sleep(2)   # give the DB a moment to settle
+                        self._login(page, _retries=2)
+                        start_url = page.url or start_url
+
+                    if "setup.php" in start_url or "login" in start_url.lower():
+                        logger.error(
+                            "Database initialisation or login failed. "
+                            "Visit /setup.php in your browser and click "
+                            "'Create / Reset Database', then re-run the scanner."
+                        )
+
+                    # Only attempt to set security level if login succeeded.
+                    if "login" not in start_url.lower() and "setup.php" not in start_url:
+                        self._set_security_low(page)
+                    # Capture ALL relevant cookies so detectors that use a
+                    # plain requests.Session can send the exact same cookie
+                    # jar as the browser.
+                    self.session_cookie = self._capture_cookies(context)
+
+                elif self.config.auth_cookie:
+                    # Cookie already injected into context above. Navigate to
+                    # the target so _set_security_low can submit the security
+                    # form within this authenticated session, then re-capture
+                    # the full cookie jar (including any updated security level
+                    # cookie) for propagation to detectors.
+                    if self._goto(page, self.config.target):
+                        self._set_security_low(page)
+                    self.session_cookie = self._capture_cookies(context)
 
                 # Begin recursive crawl
                 self._crawl_page(page, start_url, depth=0)
+
+                # Re-capture all cookies after crawling — values may have
+                # been refreshed during navigation.
+                refreshed = self._capture_cookies(context)
+                if refreshed:
+                    self.session_cookie = refreshed
+                    logger.debug("Session cookies refreshed post-crawl")
 
                 browser.close()
 
@@ -128,6 +205,14 @@ class BrowserCrawler:
             logger.debug(f"Out of scope, skipping: {url}")
             return
 
+        # Skip any URL that would log the browser out and invalidate the session
+        from urllib.parse import urlparse as _urlparse
+        _path = _urlparse(url).path.lower()
+        if any(pat in _path for pat in _LOGOUT_PATTERNS):
+            logger.debug(f"Skipping logout URL to preserve session: {url}")
+            self.visited.add(url)  # mark visited so we don't re-evaluate
+            return
+
         self.visited.add(url)
         self.found_urls.append(url)
         logger.info(f"Browser crawling [{depth}/{self.config.max_depth}]: {url}")
@@ -170,53 +255,159 @@ class BrowserCrawler:
             logger.warning(f"Navigation failed for {url}: {e}")
             return False
 
-    def _login(self, page: Page) -> None:
+    def _login(self, page: Page, _retries: int = 3, _retry_delay: int = 5) -> None:
         """
         Attempt to log in using config.username and config.password.
 
         Navigates to the target, looks for a password field, fills in
-        credentials and submits. Generic enough to work with DVWA and
-        Juice Shop without hardcoding field names.
+        credentials and submits. Retries up to _retries times with a short
+        delay to handle cases where the database is still initialising when
+        the scan starts (common on fresh Docker setups).
         """
-        logger.info(f"Attempting login as '{self.config.username}'")
+        for attempt in range(1, _retries + 1):
+            logger.info(
+                f"Attempting login as '{self.config.username}'"
+                + (f" (attempt {attempt}/{_retries})" if attempt > 1 else "")
+            )
 
-        if not self._goto(page, self.config.target):
-            logger.error("Could not reach target for login")
-            return
-
-        try:
-            # Look for a password input — if not found, we may already be logged in
-            password_field = page.query_selector("input[type='password']")
-            if not password_field:
-                logger.info("No login form found — may already be authenticated")
+            if not self._goto(page, self.config.target):
+                logger.error("Could not reach target for login")
                 return
 
-            # Fill username — try common field names in order
-            for selector in ["input[name='username']", "input[name='user']",
-                             "input[name='email']", "input[type='text']"]:
-                field = page.query_selector(selector)
-                if field:
-                    field.fill(self.config.username, timeout=self.config.browser_timeout)
-                    logger.debug(f"Filled username using selector: {selector}")
-                    break
+            try:
+                # Look for a password input — if not found, we may already be logged in
+                password_field = page.query_selector("input[type='password']")
+                if not password_field:
+                    logger.info("No login form found — may already be authenticated")
+                    return
 
-            # Fill password
-            password_field.fill(self.config.password, timeout=self.config.browser_timeout)
-            logger.debug("Filled password field")
+                # Fill username — try common field names in order
+                for selector in ["input[name='username']", "input[name='user']",
+                                 "input[name='email']", "input[type='text']"]:
+                    field = page.query_selector(selector)
+                    if field:
+                        field.fill(self.config.username, timeout=self.config.browser_timeout)
+                        logger.debug(f"Filled username using selector: {selector}")
+                        break
 
-            # Submit — look for a submit button or fall back to pressing Enter
-            submit = page.query_selector("input[type='submit'], button[type='submit']")
-            if submit:
-                submit.click(timeout=self.config.browser_timeout)
-            else:
-                password_field.press("Enter")
+                # Fill password
+                password_field.fill(self.config.password, timeout=self.config.browser_timeout)
+                logger.debug("Filled password field")
 
-            page.wait_for_load_state("domcontentloaded",
-                                     timeout=self.config.browser_timeout)
-            logger.info("Login submitted successfully")
+                # Submit — look for a submit button or fall back to pressing Enter
+                submit = page.query_selector("input[type='submit'], button[type='submit']")
+                if submit:
+                    submit.click(timeout=self.config.browser_timeout)
+                else:
+                    password_field.press("Enter")
 
+                page.wait_for_load_state("domcontentloaded",
+                                         timeout=self.config.browser_timeout)
+
+                # Verify we actually landed on an authenticated page.
+                landed = page.url
+                if "login" not in landed.lower():
+                    logger.info(f"Login successful — landed on: {landed}")
+                    return   # success
+
+                # Still on login — surface the error message from the page.
+                err_msg = ""
+                for err_sel in [".loginError", "#error_box", ".error",
+                                 "p.message", ".message"]:
+                    el = page.query_selector(err_sel)
+                    if el:
+                        err_msg = el.inner_text().strip()
+                        break
+
+                if attempt < _retries:
+                    logger.warning(
+                        f"Login attempt {attempt} failed"
+                        + (f" — '{err_msg}'" if err_msg else "")
+                        + f". Retrying in {_retry_delay}s "
+                        "(database may still be initialising)..."
+                    )
+                    time.sleep(_retry_delay)
+                else:
+                    logger.error(
+                        f"Login failed after {_retries} attempt(s) — "
+                        f"still on login page ({landed}). "
+                        + (f"Server message: '{err_msg}'. " if err_msg else "")
+                        + "Check --username / --password are correct and the "
+                        "application database is initialised."
+                    )
+
+            except Exception as e:
+                logger.error(f"Login attempt {attempt} raised an exception: {e}")
+                if attempt < _retries:
+                    time.sleep(_retry_delay)
+
+    def _run_setup(self, page: Page) -> None:
+        """
+        If the current page is a setup/initialisation page, click the primary
+        submit button to create the database.
+
+        This is a best-effort, generic step. It works for DVWA's setup.php but
+        degrades gracefully for any other target — if no submit button is found
+        the method returns without error and the scan continues.
+        """
+        try:
+            submit = page.locator("input[type='submit'], button[type='submit']")
+            if submit.count() == 0:
+                logger.debug("_run_setup: no submit button found on setup page")
+                return
+            logger.info("Running setup — clicking database initialisation button...")
+            submit.first.click(timeout=self.config.browser_timeout)
+            page.wait_for_load_state("domcontentloaded", timeout=self.config.browser_timeout)
+            logger.info(f"Setup complete — now on: {page.url}")
         except Exception as e:
-            logger.error(f"Login attempt failed: {e}")
+            logger.warning(f"Setup step failed: {e}")
+
+    def _set_security_low(self, page: Page) -> None:
+        """
+        Attempt to set the DVWA security level to Low within the current
+        browser session by submitting the security.php form.
+
+        This is a best-effort, DVWA-specific step. If security.php does not
+        exist on the target the navigation will fail gracefully and the scan
+        continues unchanged.
+        """
+        security_url = self.config.target.rstrip("/") + "/security.php"
+        try:
+            page.goto(
+                security_url,
+                timeout=self.config.browser_timeout,
+                wait_until="domcontentloaded",
+            )
+            landed_url = page.url
+            logger.debug(f"Security page navigation landed on: {landed_url}")
+
+            # Only act if the security form is actually present.
+            # If the browser was redirected (e.g. to login.php because the
+            # session is invalid), the form won't exist and we log a warning.
+            select = page.locator("select[name='security']")
+            if select.count() == 0:
+                if "login" in landed_url.lower() or "security.php" not in landed_url.lower():
+                    logger.warning(
+                        f"Security level form not found — browser was redirected to "
+                        f"{landed_url}. The session may be expired or invalid. "
+                        f"Re-run with --username / --password to obtain a fresh session."
+                    )
+                else:
+                    logger.debug(
+                        "Security level form not found on target — "
+                        "target may not support security level selection."
+                    )
+                return
+            select.select_option("low")
+            submit = page.locator("input[name='seclev_submit']")
+            if submit.count() > 0:
+                submit.first.click(timeout=self.config.browser_timeout)
+                page.wait_for_load_state(
+                    "domcontentloaded", timeout=self.config.browser_timeout
+                )
+            logger.info("Security level set to Low for this session")
+        except Exception as e:
+            logger.debug(f"Could not set security level: {e}")
 
     # ------------------------------------------------------------------
     # Extraction helpers
@@ -285,6 +476,48 @@ class BrowserCrawler:
     # ------------------------------------------------------------------
     # Dialog handler
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Cookie helpers
+    # ------------------------------------------------------------------
+
+    def _capture_cookies(self, context) -> Optional[str]:
+        """
+        Collect ALL relevant cookies from the browser context and return
+        them as a semicolon-separated 'name=value' string suitable for
+        use in a requests.Session or Playwright cookie injection.
+
+        Captures PHPSESSID (authentication) AND the 'security' cookie
+        (DVWA uses $_COOKIE['security'] to determine the vulnerability
+        level — missing this cookie causes DVWA to default to 'impossible'
+        which HTML-encodes all output, silently defeating XSS probes).
+        """
+        # Names we always want to carry over
+        _SESSION_NAMES = {"phpsessid", "session", "sessionid", "connect.sid"}
+        _EXTRA_NAMES   = {"security"}   # DVWA-specific level cookie
+
+        parts = []
+        try:
+            for cookie in context.cookies():
+                name_lower = cookie["name"].lower()
+                if name_lower in _SESSION_NAMES or name_lower in _EXTRA_NAMES:
+                    parts.append(f"{cookie['name']}={cookie['value']}")
+                    logger.debug(f"Cookie captured: {cookie['name']}")
+        except Exception as e:
+            logger.debug(f"Cookie capture failed: {e}")
+
+        result = "; ".join(parts) if parts else None
+        if result:
+            # Mask session token values (they're auth credentials) but leave
+            # non-sensitive config cookies (e.g. security=low) readable.
+            masked = "; ".join(
+                f"{p.split('=')[0]}={p.split('=', 1)[1][:6]}***"
+                if "=" in p and p.split("=")[0].lower() in _SESSION_NAMES
+                else p
+                for p in parts
+            )
+            logger.info(f"Cookies propagated to detectors: {masked}")
+        return result
 
     def _attach_dialog_handler(self, page: Page) -> None:
         """

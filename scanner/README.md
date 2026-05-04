@@ -82,6 +82,14 @@ scanner/
 
 ## Requirements
 
+### Docker (recommended)
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Windows) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux)
+
+Docker includes both the `docker` CLI and Docker Compose. No other dependencies are needed — Python, Chromium, sqlmap, and Nikto are all bundled in the image.
+
+### Local installation
+
 - Python 3.9 or higher
 - pip
 
@@ -172,37 +180,41 @@ The `docker-compose.yml` spins up both the scanner and DVWA (plus an optional Ju
 
 ### Before you start
 
-The scanner image must be built locally before Docker Compose can use it — it is not pulled from a registry:
+Build the scanner image once to install system packages and Python dependencies:
 
 ```bash
-docker build -t wstg-scanner .
+docker compose build scanner
 ```
 
-You only need to do this once (and again if you modify the scanner code).
+**You do not need to rebuild after editing scanner code.** The `docker-compose.yml` mounts the `scanner/` directory as a live bind mount, so any code changes are picked up immediately the next time you run the scanner. Only rebuild if you add a package to `requirements.txt` or change the `Dockerfile`.
 
-The DVWA and MySQL images are pulled automatically by Docker Compose on first run — no manual `docker pull` needed.
+The DVWA and MariaDB images are pulled automatically by Docker Compose on first run — no manual `docker pull` needed.
 
 ### Quick start
 
+The `dvwa-setup` service creates the DVWA database and sets the security level to Low automatically. If setup is unavailable or fails, the scanner detects the uninitialised state and initialises the database itself before scanning.
+
 ```bash
-# 1. Start DVWA and its database
-#    Docker pulls ghcr.io/digininja/dvwa and mysql:8.0 automatically
-#    on the first run — this may take a minute.
-docker compose up -d dvwa
+# 1. Start DVWA, its database, and the one-shot setup service.
+#    Docker pulls the required images automatically on first run.
+docker compose up -d dvwa dvwa-setup
 
-# 2. Wait ~30 seconds for the database to initialise, then open:
-#    http://localhost:42001
-#    Log in (admin / password), click "Create / Reset Database",
-#    and set the security level to Low.
+# 2. Wait ~30-60 seconds for setup to complete. Follow progress with:
+docker compose logs -f dvwa-setup
+#    Look for: [setup-dvwa] Setup complete. DVWA is ready to scan.
 
-# 3. Run the scanner against it
+# 3. Run the scanner. Use --report-base-url so links in the HTML report
+#    point to the browser-accessible URL rather than the internal hostname.
 docker compose run --rm scanner \
   --target http://dvwa \
   --username admin \
   --password password \
   --format both \
-  --output reports/scan
+  --output reports/scan \
+  --report-base-url http://localhost:42001
 ```
+
+Default DVWA credentials: **username = admin**, **password = password**
 
 Reports are written to `./reports/` on your host machine.
 
@@ -214,8 +226,20 @@ docker compose run --rm scanner \
   --username admin \
   --password password \
   --use-sqlmap --use-nikto \
+  --screenshots \
   --format both \
-  --output reports/scan
+  --output reports/scan \
+  --report-base-url http://localhost:42001
+```
+
+### Full reset
+
+If DVWA becomes unresponsive or login stops working, tear everything down including the database volume and start fresh:
+
+```bash
+docker compose down -v
+docker compose up -d dvwa dvwa-setup
+docker compose logs -f dvwa-setup
 ```
 
 ### Scan Juice Shop (optional profile)
@@ -296,6 +320,7 @@ python3 main.py --help
 | `--open` | | `False` | Open the report(s) in the default browser when the scan completes |
 | `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |
 | `--password` | | `None` | Password for login — use with `--username` |
+| `--report-base-url` | | `None` | Public-facing base URL to substitute into report links. Use when the scanner reaches the target via an internal hostname (e.g. `http://dvwa`) but report links should be browser-accessible (e.g. `http://localhost:42001`) |
 | `--screenshots` | | `False` | Capture browser screenshots as evidence for findings |
 | `--use-nikto` | | `False` | Run Nikto against the target after built-in checks (requires Nikto on PATH) |
 | `--use-sqlmap` | | `False` | Run sqlmap against injectable URLs after built-in checks (requires sqlmap on PATH) |
@@ -436,7 +461,7 @@ docker pull ghcr.io/digininja/dvwa
 docker run -d -p 42001:80 ghcr.io/digininja/dvwa
 ```
 
-Navigate to `http://localhost:42001`, complete the setup, then scan:
+Navigate to `http://localhost:42001`, log in with the default credentials (`admin` / `password`), complete the setup, then scan:
 
 ```bash
 # Local

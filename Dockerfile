@@ -6,32 +6,45 @@
 #           wstg-scanner --target http://TARGET --output reports/scan
 # ============================================================
 
-FROM python:3.11-slim
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
 # ── Labels ────────────────────────────────────────────────────────────
 LABEL description="OWASP WSTG Python Security Scanner" \
       org.opencontainers.image.source="https://github.com/your-repo/wstg-scanner"
 
 # ── Environment ───────────────────────────────────────────────────────
-# PLAYWRIGHT_BROWSERS_PATH: install Chromium to a fixed, world-readable
-# location so both the root user (build) and the non-root scanner user
-# (runtime) can find the browser binary.
+# The Playwright base image pre-installs Chromium at /ms-playwright and
+# sets PLAYWRIGHT_BROWSERS_PATH accordingly — no browser install needed.
 # PYTHONUNBUFFERED: ensure log output is flushed immediately to stdout
 # so docker logs show real-time scan progress.
-ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
-    PYTHONDONTWRITEBYTECODE=1 \
+ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 # ── System dependencies ───────────────────────────────────────────────
-# sqlmap and nikto are optional — the scanner degrades gracefully if they
-# are absent. They are included here for the full Kali-style experience.
+# nikto is not in the standard Debian/Ubuntu repos — clone it from
+# GitHub and symlink the Perl script onto PATH. perl and
+# libnet-ssleay-perl are its only runtime dependencies.
+# git is purged after the clone to keep the image lean.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         curl \
         wget \
-        nikto \
-        sqlmap \
+        git \
+        perl \
+        libnet-ssleay-perl \
+        libjson-perl \
+        libxml-writer-perl \
+        libnet-http-perl \
+    && git clone --depth 1 https://github.com/sullo/nikto.git /opt/nikto \
+    && ln -sf /opt/nikto/program/nikto.pl /usr/local/bin/nikto \
+    && chmod +x /opt/nikto/program/nikto.pl \
+    && apt-get purge -y --auto-remove git \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Make Playwright browsers accessible to non-root user ──────────────
+# The base image installs Chromium as root. chmod allows the non-root
+# scanner user created below to execute the browser binary.
+RUN chmod -R o+rx /ms-playwright
 
 # ── Working directory ─────────────────────────────────────────────────
 WORKDIR /scanner
@@ -39,18 +52,10 @@ WORKDIR /scanner
 # ── Python dependencies ───────────────────────────────────────────────
 # Copy requirements before source so Docker caches this layer separately.
 # Source changes will not invalidate the pip install layer.
+# sqlmap is installed via pip — it is not in the standard Debian repos.
 COPY scanner/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# ── Playwright: system libraries + Chromium browser ───────────────────
-# playwright install-deps  — installs the OS libraries Chromium needs
-#                            (libnss3, libatk, libdrm, etc.)
-# playwright install       — downloads the Chromium binary itself
-# chmod                    — makes the binary readable by all users so
-#                            the non-root scanner user can launch it
-RUN playwright install-deps chromium \
-    && playwright install chromium \
-    && chmod -R o+rx /opt/ms-playwright
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir sqlmap
 
 # ── Scanner source ────────────────────────────────────────────────────
 COPY scanner/ .
@@ -58,7 +63,7 @@ COPY scanner/ .
 # ── Non-root user ─────────────────────────────────────────────────────
 # Running as a non-root user limits impact if the scanner processes
 # malicious payloads returned by the target application.
-RUN useradd -m -u 1000 scanner \
+RUN useradd -m -u 1001 scanner \
     && chown -R scanner:scanner /scanner
 
 USER scanner

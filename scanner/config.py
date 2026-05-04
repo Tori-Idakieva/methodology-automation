@@ -16,6 +16,16 @@ class ScannerConfig:
     target: str = "http://localhost"
     output: str = "report"              # base name, no extension
     format: str = "html"
+    # When the scanner reaches the target via an internal network address
+    # (e.g. Docker service name "http://dvwa") but the user's browser uses a
+    # different URL (e.g. "http://localhost:42001"), set report_base_url to the
+    # browser-accessible address. All finding URLs in the report are rewritten
+    # from target → report_base_url before the report is written.
+    # When None (the default), report URLs are left as-is (equal to target).
+    # Set this when --target is a Docker-internal hostname that differs from
+    # what a browser can reach, e.g. report_base_url="http://localhost:42001"
+    # while target="http://dvwa".
+    report_base_url: Optional[str] = None
 
     # Credentials / auth — all optional, None when not supplied
     auth_cookie: Optional[str] = None
@@ -70,4 +80,5 @@ class ScannerConfig:
             use_sqlmap=args.use_sqlmap,
             use_nikto=args.use_nikto,
             open_report=args.open,
+            report_base_url=getattr(args, "report_base_url", None),
         )

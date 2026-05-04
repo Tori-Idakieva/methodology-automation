@@ -142,7 +142,7 @@ class NVDEnricher:
                     finding["owasp_top10"] = metadata["owasp_top10"]
                     finding["nvd_url"]     = (
                         "https://nvd.nist.gov/vuln/search/results"
-                        f"?form_type=Advanced&cwe_id={metadata['cwe_id']}"
+                        f"?query={metadata['cwe_id']}&search_type=all&form_type=Basic"
                     )
 
                     cwe_id = metadata["cwe_id"]

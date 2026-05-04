@@ -183,20 +183,35 @@ class HTMLReporter:
         evidence = self._escape(finding.get("evidence", "—"))
 
         # NVD enrichment fields
-        cwe_id    = finding.get("cwe_id",   "N/A")
-        wstg_ref  = finding.get("wstg_ref", "N/A")
-        cve_count = finding.get("cve_count", "N/A")
-        nvd_url   = finding.get("nvd_url",  "")
+        cwe_id      = finding.get("cwe_id",       "N/A")
+        wstg_ref    = finding.get("wstg_ref",     "N/A")
+        cve_count   = finding.get("cve_count",    "N/A")
+        nvd_url     = finding.get("nvd_url",      "")
+        sample_cve  = finding.get("sample_cve",   "")
+        sample_url  = finding.get("sample_cve_url", "")
 
         cwe_cell = (
             f"<a href='https://cwe.mitre.org/data/definitions/{cwe_id.replace('CWE-', '')}.html' "
             f"style='color:#3182ce'>{cwe_id}</a>"
             if cwe_id != "N/A" else "N/A"
         )
-        cve_cell = (
-            f"<a href='{nvd_url}' style='color:#3182ce'>{cve_count}</a>"
-            if nvd_url else str(cve_count)
-        )
+
+        # Escape & as &amp; so the query string survives HTML attribute parsing.
+        safe_nvd_url    = nvd_url.replace("&", "&amp;")
+        safe_sample_url = sample_url.replace("&", "&amp;")
+
+        if nvd_url:
+            count_text = f"{cve_count} CVEs"
+            if sample_cve and sample_url:
+                cve_cell = (
+                    f"{count_text} "
+                    f"<a href='{safe_sample_url}' style='color:#718096;font-size:0.8em'>"
+                    f"({sample_cve})</a>"
+                )
+            else:
+                cve_cell = count_text
+        else:
+            cve_cell = str(cve_count)
 
         return (
             f"<tr>"

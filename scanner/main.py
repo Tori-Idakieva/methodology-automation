@@ -183,6 +183,16 @@ def main() -> None:
             f"[bold]{len(browser_urls)}[/bold] URL(s)"
         )
 
+        # Always propagate the cookie jar captured during the browser crawl to
+        # detectors. This ensures any security-level cookie set during the crawl
+        # (e.g. security=low) is included even when --auth-cookie was supplied
+        # on the command line — the crawl refreshes and normalises the jar.
+        if browser_crawler.session_cookie:
+            config.auth_cookie = browser_crawler.session_cookie
+            logger.debug(
+                f"Session cookie propagated to detectors: {config.auth_cookie}"
+            )
+
         all_urls  = list(set(http_urls + browser_urls))
         all_forms = http_crawler.forms + browser_crawler.forms
         console.print(
@@ -205,9 +215,14 @@ def main() -> None:
 
         for detector in detectors:
             name = type(detector).__name__.replace("Detector", "")
-            with console.status(f"[cyan]Running {name} checks...[/cyan]"):
+            # XSSDetector manages its own Rich progress bar internally,
+            # so we skip the outer status spinner to avoid display conflicts.
+            if name == "XSS":
                 results = detector.run(all_urls)
-                findings.extend(results)
+            else:
+                with console.status(f"[cyan]Running {name} checks...[/cyan]"):
+                    results = detector.run(all_urls)
+            findings.extend(results)
             console.print(
                 f"[green]✓[/green] {name}: [bold]{len(results)}[/bold] finding(s)"
             )
@@ -219,12 +234,13 @@ def main() -> None:
             _phase("Phase 3 — External Tools")
 
         if config.use_sqlmap:
-            with console.status("[cyan]Running sqlmap...[/cyan]"):
-                sqlmap_findings = SqlmapRunner(
-                    target=config.target,
-                    urls=all_urls,
-                    forms=all_forms,
-                ).run()
+            # SqlmapRunner streams its own live panel — no status wrapper needed
+            sqlmap_findings = SqlmapRunner(
+                target=config.target,
+                urls=all_urls,
+                forms=all_forms,
+                auth_cookie=config.auth_cookie,
+            ).run()
             findings.extend(sqlmap_findings)
             console.print(
                 f"[green]✓[/green] sqlmap: "
@@ -232,8 +248,11 @@ def main() -> None:
             )
 
         if config.use_nikto:
-            with console.status("[cyan]Running Nikto...[/cyan]"):
-                nikto_findings = NiktoRunner(target=config.target).run()
+            # NiktoRunner streams its own live panel — no status wrapper needed
+            nikto_findings = NiktoRunner(
+                target=config.target,
+                auth_cookie=config.auth_cookie,
+            ).run()
             findings.extend(nikto_findings)
             console.print(
                 f"[green]✓[/green] Nikto: "
@@ -251,6 +270,33 @@ def main() -> None:
         _phase("Phase 4 — NVD Enrichment")
 
         findings = NVDEnricher().enrich(findings)
+
+        # ----------------------------------------------------------------
+        # URL rewriting — replace internal scan address with the
+        # browser-accessible address before writing the report.
+        # ----------------------------------------------------------------
+        report_base = (config.report_base_url or "").rstrip("/")
+        internal    = config.target.rstrip("/")
+        if report_base and report_base != internal:
+            logger.debug(
+                f"Rewriting report URLs: {internal!r} → {report_base!r}"
+            )
+            # hostname-only portion of the internal target (e.g. "dvwa")
+            _internal_host = urlparse(internal).netloc
+            for finding in findings:
+                raw_url = finding.get("url", "")
+                if not raw_url:
+                    continue
+                # Nikto sometimes emits bare "hostname/path" strings without a
+                # scheme (e.g. "dvwa/phpinfo.php"). Normalise those first so the
+                # replace() below works correctly without doubling the hostname.
+                if "://" not in raw_url:
+                    if raw_url.startswith(_internal_host):
+                        # "dvwa/phpinfo.php" → "http://dvwa/phpinfo.php"
+                        raw_url = internal + raw_url[len(_internal_host):]
+                    else:
+                        raw_url = internal + "/" + raw_url.lstrip("/")
+                finding["url"] = raw_url.replace(internal, report_base, 1)
 
         # ----------------------------------------------------------------
         # Phase 5 — Report

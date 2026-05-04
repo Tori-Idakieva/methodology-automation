@@ -4,13 +4,10 @@
 #
 # Quick start with DVWA:
 #
-#   1. Start DVWA:
-#        docker compose up -d dvwa
+#   1. Start DVWA (database is created and security set to Low automatically):
+#        docker compose up -d dvwa dvwa-setup
 #
-#   2. Open http://localhost:42001, log in (admin/password),
-#      click "Create / Reset Database", set security to Low.
-#
-#   3. Run the scanner:
+#   2. Wait for setup to complete (~30-60 seconds), then run the scanner:
 #        docker compose run --rm scanner \
 #          --target http://dvwa \
 #          --username admin \
@@ -39,8 +36,12 @@ services:
       dockerfile: Dockerfile
     image: wstg-scanner
     volumes:
-      # Reports written to /scanner/reports in the container are
-      # accessible at ./reports/ on the host after the scan completes.
+      # Live bind-mount of the scanner source so code changes are picked up
+      # immediately without rebuilding the image. The image still provides all
+      # system deps and pip packages — only the Python source is overridden.
+      - ./scanner:/scanner
+      # Reports are written to ./reports/ on the host. This mount shadows the
+      # scanner sub-directory so reports land outside the source tree.
       - ./reports:/scanner/reports
     networks:
       - scan-net
@@ -57,6 +58,10 @@ services:
       DB_SERVER: dvwa-db
       RECAPTCHA_PRIV_KEY: ""
       RECAPTCHA_PUB_KEY: ""
+      # Sets the default security level for every new PHP session.
+      # Without this, new sessions (including the scanner's) default to
+      # "impossible", which sanitises all payloads and produces 0 findings.
+      DVWA_DEFAULT_SECURITY_LEVEL: low
     depends_on:
       dvwa-db:
         condition: service_healthy
@@ -70,12 +75,16 @@ services:
       start_period: 30s
 
   dvwa-db:
-    image: mysql:8.0
+    image: mariadb:10.6
     environment:
       MYSQL_ROOT_PASSWORD: dvwa
       MYSQL_DATABASE: dvwa
       MYSQL_USER: dvwa
       MYSQL_PASSWORD: p@ssw0rd
+    volumes:
+      # Named volume so the database persists across container restarts.
+      # Use `docker compose down -v` only if you want a completely fresh DB.
+      - dvwa-db-data:/var/lib/mysql
     networks:
       - scan-net
     healthcheck:
@@ -83,6 +92,24 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # ── DVWA Auto-Setup ───────────────────────────────────────────────────
+  # Runs once after DVWA is healthy. Installs curl, then runs the setup
+  # script which creates the database and sets the security level to Low.
+  # No manual browser steps required.
+  dvwa-setup:
+    image: alpine:3.19
+    volumes:
+      - ./scripts/setup-dvwa.sh:/setup-dvwa.sh:ro
+    networks:
+      - scan-net
+    depends_on:
+      dvwa:
+        condition: service_healthy
+    environment:
+      DVWA_URL: http://dvwa
+    command: ["sh", "-c", "apk add --no-cache curl -q && sh /setup-dvwa.sh"]
+    restart: "no"
 
   # ── OWASP Juice Shop (optional test target) ───────────────────────────
   # Enable with: docker compose --profile juice-shop up -d juice-shop
@@ -101,3 +128,7 @@ services:
 networks:
   scan-net:
     driver: bridge
+
+# ── Named volumes ─────────────────────────────────────────────────────
+volumes:
+  dvwa-db-data:   # persists MariaDB data across container restarts

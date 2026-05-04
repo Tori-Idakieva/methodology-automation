@@ -13,6 +13,7 @@ Strategy:
 """
 
 import requests
+from urllib.parse import urlparse, parse_qs
 from typing import List, Optional
 from config import ScannerConfig
 from payloads import SQLI_PAYLOADS, SQLI_ERROR_SIGNATURES
@@ -24,6 +25,15 @@ logger = get_logger(__name__)
 
 # How much the response length must differ (%) to flag boolean-based blind SQLi
 BOOLEAN_DIFF_THRESHOLD = 0.20  # 20%
+
+# URL parameters that are typically used for file inclusion / path traversal,
+# not SQL queries. Injecting SQL syntax into these causes "file not found"
+# responses (dramatic length change) that look like boolean-based SQLi but
+# are actually false positives. Skip them for SQL injection testing.
+_FILE_INCLUSION_PARAMS = frozenset({
+    "page", "file", "doc", "path", "dir", "include", "filepath",
+    "template", "load", "view", "pg", "p", "module", "section",
+})
 
 
 class SQLiDetector:
@@ -77,6 +87,14 @@ class SQLiDetector:
             return findings
 
         for param in params:
+            # Skip parameters commonly used for file inclusion / path traversal —
+            # injecting SQL syntax into these causes "file not found" responses
+            # (large length change) that look like boolean-based blind SQLi but
+            # are actually false positives.
+            if param.lower() in _FILE_INCLUSION_PARAMS:
+                logger.debug(f"SQLi: skipping file-inclusion-like parameter '{param}' on {url}")
+                continue
+
             payloads = SQLI_PAYLOADS[:self.config.max_payloads_per_param]
             for payload in payloads:
                 injected_url = inject_param(url, param, payload)
@@ -102,6 +120,11 @@ class SQLiDetector:
     # Form testing
     # ------------------------------------------------------------------
 
+    # URL path segments whose forms accept OS commands, not SQL queries.
+    # Injecting SQL syntax into these causes the server to try to execute
+    # the payload as a shell command, which hangs until the OS timeout.
+    _CMD_INJECTION_PATHS = frozenset({"exec", "cmd", "command", "ping", "shell"})
+
     def _test_form(self, form: dict) -> List[dict]:
         """
         Inject SQLi payloads into each input field of a discovered form.
@@ -112,6 +135,15 @@ class SQLiDetector:
         inputs  = form.get("inputs", [])
 
         if not action or not inputs:
+            return findings
+
+        # Skip forms whose action URL looks like a command-injection endpoint.
+        # These don't query a SQL database and will timeout waiting for the OS
+        # to process injected shell syntax (e.g. DVWA's exec/ endpoint).
+        from urllib.parse import urlparse as _up
+        _path_parts = set(_up(action).path.strip("/").split("/"))
+        if _path_parts & self._CMD_INJECTION_PATHS:
+            logger.debug(f"SQLi: skipping command-injection-like form: {action}")
             return findings
 
         for field in inputs:
