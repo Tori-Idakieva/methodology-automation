@@ -139,6 +139,18 @@ def main() -> None:
         config = ScannerConfig.from_args(args)
         configure_from_config(log_level=config.log_level, verbose=config.verbose)
 
+        # Always append a timestamp so successive scans never overwrite each other.
+        # --output myscan  →  myscan-YYYYMMDD-HHMMSS
+        # (no --output)    →  scan-YYYYMMDD-HHMMSS
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        if config.output:
+            config.output = f"{config.output}-{timestamp}"
+            logger.debug(f"Output name with timestamp: {config.output}")
+        else:
+            config.output = f"scan-{timestamp}"
+            logger.debug(f"No --output supplied — using auto-generated name: {config.output}")
+
         # Guard — both or neither credential flags must be supplied
         if bool(config.username) != bool(config.password):
             logger.critical("--username and --password must be used together")

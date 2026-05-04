@@ -5,10 +5,11 @@ Serialises all findings to a structured JSON file for machine-readable
 output, archiving, and potential import into other tooling.
 """
 
+import os
 from datetime import datetime, timezone
 from typing import List
 from config import ScannerConfig
-from utils.file_handler import write_json
+from utils.file_handler import write_json, REPORTS_DIR
 from utils.logger import get_logger
 from reporting import severity_counts
 
@@ -27,7 +28,7 @@ class JSONReporter:
 
         Returns the path of the written file.
         """
-        path = f"{self.config.output}.json"
+        path = os.path.join(REPORTS_DIR, f"{self.config.output}.json")
         report = self._build_report(findings)
         write_json(path, report)
         logger.info(f"JSON report written to: {path}")

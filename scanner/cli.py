@@ -58,8 +58,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "-o", "--output",
-        default="report",
-        help="Output file base name, without extension (default: report). Extension is added automatically based on --format.",
+        default=None,
+        help=(
+            "Base name for the output file, without extension. "
+            "A timestamp is always appended — e.g. --output myscan produces "
+            "myscan-20260506-153042.html. Defaults to scan-YYYYMMDD-HHMMSS when omitted. "
+            "Successive scans never overwrite each other."
+        ),
     )
     parser.add_argument(
         "--password",

@@ -33,7 +33,7 @@ Both crawlers produce a merged list of URLs and form injection vectors that the 
 
 ```
 Dockerfile              # Scanner image (Python + Chromium + sqlmap + Nikto)
-docker-compose.yml      # DVWA + scanner + optional Juice Shop
+docker-compose.yml      # DVWA + scanner orchestration
 scripts/
   setup-dvwa.sh         # Automated DVWA database init + security level setup
 scanner/
@@ -108,13 +108,10 @@ docker compose run --rm scanner \
   --username admin \
   --password password \
   --format both \
-  --output reports/scan \
   --report-base-url http://localhost:42001
 ```
 
-`--report-base-url` rewrites internal Docker hostnames (`http://dvwa`) to browser-accessible URLs (`http://localhost:42001`) in the HTML report so every finding link is clickable.
-
-Reports are written to `./reports/` on your host as `scan.html` and `scan.json`.
+`--report-base-url` rewrites internal Docker hostnames (`http://dvwa`) to browser-accessible URLs (`http://localhost:42001`) in the HTML report so every finding link is clickable. Reports are written to `./reports/` on your host with an auto-generated timestamped filename (e.g. `scan-20260506-153042.html`).
 
 ### Step 4 — Run with all tools (optional)
 
@@ -128,7 +125,6 @@ docker compose run --rm scanner \
   --use-sqlmap --use-nikto \
   --screenshots \
   --format both \
-  --output reports/scan \
   --report-base-url http://localhost:42001
 ```
 
@@ -148,70 +144,79 @@ docker compose down -v
 
 ---
 
-## Running against a standalone target (docker run)
+## Scanning a different target
 
-To scan any target without Docker Compose, mount a reports directory and pass the target URL:
-
-```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  wstg-scanner \
-  --target http://TARGET \
-  --output reports/scan \
-  --format both
-```
-
-With authentication and all tools:
+To scan any target, just change `--target` and remove the `--report-base-url` flag (that is only needed when the scanner reaches the target via an internal Docker hostname):
 
 ```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  -v $(pwd)/evidence:/scanner/evidence \
-  wstg-scanner \
-  --target http://TARGET \
+docker compose run --rm scanner \
+  --target http://YOUR_TARGET \
   --username admin --password password \
   --use-sqlmap --use-nikto \
   --screenshots \
-  --output reports/scan \
   --format both
 ```
 
----
-
-## Juice Shop (optional test target)
-
-```bash
-docker compose --profile juice-shop up -d juice-shop
-
-docker compose run --rm scanner \
-  --target http://juice-shop:3000 \
-  --format both \
-  --output reports/scan
-```
+Reports are written to `./reports/` on your host. A timestamp is always appended to the filename — if you pass `--output myscan` the file is `myscan-20260506-153042.html`; with no `--output` it defaults to `scan-20260506-153042.html`. Successive scans never overwrite each other.
 
 ---
 
 ## Local Installation (alternative to Docker)
 
+All commands below are run from the `scanner/` directory. Docker is recommended for Windows and macOS — local install is simplest on Linux and Kali.
+
+### Step 1 — Install Python dependencies
+
 ```bash
 cd scanner
-pip install -r requirements.txt
-playwright install chromium
+pip install -r requirements.txt      # Linux / macOS / Windows
 ```
 
-To install sqlmap and Nikto locally (Kali Linux / Debian):
+> **Kali Linux note:** If pip refuses to install outside a virtual environment, add `--break-system-packages`:
+> ```bash
+> pip install -r requirements.txt --break-system-packages
+> ```
+
+### Step 2 — Install Playwright and Chromium
 
 ```bash
-sudo apt install sqlmap nikto
+playwright install chromium
+playwright install-deps chromium     # Linux only — installs OS-level browser deps
 ```
 
-Run a scan:
+On Windows you can skip `install-deps`; Playwright manages its own browser binaries.
+
+### Step 3 — Install external tools (optional)
+
+| Platform | sqlmap | Nikto |
+|---|---|---|
+| **Kali Linux** | Pre-installed (or `sudo apt install sqlmap`) | Pre-installed (or `sudo apt install nikto`) |
+| **Ubuntu / Debian** | `sudo apt install sqlmap` | `sudo apt install nikto` |
+| **macOS** | `brew install sqlmap` | `brew install nikto` |
+| **Windows** | `pip install sqlmap` | Manual — download from [github.com/sullo/nikto](https://github.com/sullo/nikto), requires Perl. Recommended to use WSL2 instead. |
+
+### Step 4 — Run a scan
 
 ```bash
 python3 main.py --target http://localhost:42001 \
   --username admin --password password \
-  --format both --output report
+  --format both
 ```
+
+On Windows (native, not WSL):
+```
+python main.py --target http://localhost:42001 --username admin --password password
+```
+
+### Platform notes
+
+**macOS (Intel and Apple Silicon):** Works natively. Playwright's bundled Chromium supports both architectures. Install Homebrew (`brew.sh`) for the easiest path to sqlmap and Nikto.
+
+**Linux (Ubuntu / Debian):** Run `playwright install-deps chromium` after the Playwright install — this installs `libgtk`, `libnss`, and other shared libraries that the bundled Chromium binary needs.
+
+**Kali Linux:** sqlmap and Nikto are typically pre-installed. Run `playwright install chromium && playwright install-deps chromium` to add Playwright's Chromium. Kali uses a newer Python packaging policy, so add `--break-system-packages` to pip if prompted.
+
+**Windows:** The scanner runs on Windows natively but sqlmap and Nikto are harder to install without package manager support. **WSL2 (Windows Subsystem for Linux) is strongly recommended** — follow the Linux instructions above inside a WSL2 Ubuntu terminal, then run DVWA via Docker Desktop with WSL2 integration enabled.
 
 ---
 
@@ -240,7 +245,7 @@ docker compose run --rm scanner --target <URL> [options]
 | `--log-level` | | `info` | Verbosity: `debug`, `info`, `warning`, `error`, `critical` |
 | `--max-depth` | | `2` | Maximum crawl depth from the start URL |
 | `--open` | | `False` | Open the report in the default browser when done |
-| `--output` | `-o` | `report` | Output base name (extension added automatically) |
+| `--output` | `-o` | `scan-YYYYMMDD-HHMMSS` | Base name for the output file. A timestamp is always appended (e.g. `--output myscan` → `myscan-20260506-153042.html`). Defaults to `scan-YYYYMMDD-HHMMSS` when omitted. |
 | `--password` | | `None` | Login password (use with `--username`) |
 | `--report-base-url` | | `None` | Public URL to substitute for `--target` in report links |
 | `--screenshots` | | `False` | Save screenshots as evidence |
@@ -367,9 +372,9 @@ Runs [Nikto](https://github.com/sullo/nikto) against the target root for server 
 
 ---
 
-## Cross-platform compatibility
+## Cross-platform notes
 
-The Docker setup works on macOS (Intel and Apple Silicon), Linux, and Windows. DVWA's database uses MariaDB 10.6, which provides native ARM64 images — MySQL 8.0 is incompatible with DVWA's SQL syntax, and MySQL 5.7 has no ARM64 image.
+The Docker setup targets macOS, Linux, and Windows. DVWA's database uses MariaDB 10.6 — MySQL 8.0 is incompatible with DVWA's SQL syntax, and MySQL 5.7 has no ARM64 image, so MariaDB 10.6 is required for Apple Silicon support.
 
 ---
 
@@ -382,107 +387,3 @@ The Docker setup works on macOS (Intel and Apple Silicon), Linux, and Windows. D
 | `playwright` | Headless browser automation |
 | `rich` | Formatted terminal output and progress bars |
 | `urllib3` | Underlying HTTP transport |
-
-
----
-
-## Quick Start (Docker — recommended)
-
-Docker is the recommended way to run the scanner. It bundles Python, Chromium, sqlmap, and Nikto — nothing needs to be installed manually.
-
-### Prerequisites
-
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (macOS, Windows, Linux)
-
-### 1. Build the scanner image
-
-Run this once from the repository root (the directory containing `Dockerfile`):
-
-```bash
-docker build -t wstg-scanner .
-```
-
-### 2. Start DVWA
-
-[DVWA](https://github.com/digininja/dvwa) (Damn Vulnerable Web Application) is the recommended test target. The `docker-compose.yml` starts DVWA, its database, and an automated setup container that initialises the database and sets the security level to Low — no manual browser steps required.
-
-```bash
-docker compose up -d dvwa dvwa-setup
-```
-
-Wait ~30–60 seconds for setup to complete (you can follow progress with `docker compose logs -f dvwa-setup`), then verify DVWA is ready at http://localhost:42001.
-
-### 3. Run the scanner
-
-```bash
-docker compose run --rm scanner \
-  --target http://dvwa \
-  --username admin \
-  --password password \
-  --format both \
-  --output reports/scan
-```
-
-Reports are written to `./reports/` on your host machine as `scan.html` and `scan.json`.
-
-### 4. Run with all tools (sqlmap + Nikto + screenshots)
-
-```bash
-docker compose run --rm scanner \
-  --target http://dvwa \
-  --username admin \
-  --password password \
-  --use-sqlmap --use-nikto \
-  --screenshots \
-  --format both \
-  --output reports/scan
-```
-
-### 5. Stop everything
-
-```bash
-docker compose down
-```
-
----
-
-## Cross-platform compatibility
-
-The Docker setup is tested on macOS (Intel and Apple Silicon), Linux, and Windows. DVWA's database is backed by MariaDB 10.6, which provides a native image for all three platforms (MySQL 8.0 is incompatible with DVWA's SQL syntax, and MySQL 5.7 has no ARM64 image).
-
----
-
-## Local installation (alternative to Docker)
-
-Requires Python 3.9+, pip, and optionally sqlmap / Nikto on PATH.
-
-```bash
-cd scanner
-pip install -r requirements.txt
-playwright install chromium
-python3 main.py --target http://YOUR_TARGET --help
-```
-
----
-
-## Project structure
-
-```
-Dockerfile              # Scanner Docker image (Python + Chromium + sqlmap + Nikto)
-docker-compose.yml      # DVWA + scanner + optional Juice Shop
-scripts/
-  setup-dvwa.sh         # Automated DVWA database init + security level setup
-scanner/
-  main.py               # Entry point — orchestrates the full scan pipeline
-  cli.py                # Argument parsing
-  config.py             # Central configuration
-  http_crawler.py       # HTTP crawler (requests + BeautifulSoup)
-  browser_crawler.py    # Playwright browser crawler
-  payloads.py           # Injection payload library
-  detectors/            # XSS, SQLi, headers, directory listing
-  integrations/         # NVD CVE API, sqlmap, Nikto
-  reporting/            # HTML, JSON, terminal summary reporters
-  utils/                # Shared helpers (HTTP session, URL utils, logging)
-  requirements.txt
-  README.md             # Full usage and reference documentation
-```

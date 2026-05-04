@@ -32,7 +32,7 @@ Both crawlers produce a list of discovered URLs and a list of form injection vec
 
 The scanner supports two authentication methods:
 
-- **Credentials** (`--username` / `--password`) — the browser crawler navigates to the target, detects the login form, fills in the credentials and submits before crawling begins. Generic enough to work with DVWA and Juice Shop without hardcoding field names.
+- **Credentials** (`--username` / `--password`) — the browser crawler navigates to the target, detects the login form, fills in the credentials and submits before crawling begins. Field detection is generic and does not hardcode field names.
 - **Session cookie** (`--auth-cookie`) — injects a pre-existing session cookie into both the HTTP session and the browser context, bypassing the login step entirely.
 
 ### Evidence
@@ -95,88 +95,63 @@ Docker includes both the `docker` CLI and Docker Compose. No other dependencies 
 
 ---
 
-## Running with Docker (recommended)
+## Running with Docker Compose (recommended)
 
-Docker is the recommended way to run the scanner. The image includes everything needed out of the box — Python, Chromium, **sqlmap**, and **Nikto** — so there is nothing to install manually.
+Docker Compose is the recommended way to run the scanner. The image includes Python, Chromium, **sqlmap**, and **Nikto** — nothing needs to be installed manually. All commands run from the **project root** (the directory containing `docker-compose.yml`).
 
 ### Build the image
 
-From the project root (the directory containing `Dockerfile`):
+Run once (or after changing `requirements.txt` or `Dockerfile`):
 
 ```bash
-docker build -t wstg-scanner .
+docker compose build scanner
 ```
 
-### Run a basic scan
+Code changes in `scanner/` are picked up immediately without rebuilding — the compose file uses a live bind mount.
 
-Reports are written inside the container at `/scanner/reports/`. Mount a host directory there to retrieve them after the scan:
+### Basic scan
 
 ```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  wstg-scanner \
+docker compose run --rm scanner \
   --target http://TARGET \
-  --output reports/scan \
   --format both
 ```
 
-The `--output reports/scan` path is relative to the container's working directory (`/scanner`), so the reports land in `./reports/` on your host machine as `scan.html` and `scan.json`.
+Reports land in `./reports/` on your host with a timestamped filename (e.g. `scan-20260506-153042.html`). Pass `--output <name>` to choose a specific name.
 
 ### Authenticated scan
 
 ```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  wstg-scanner \
+docker compose run --rm scanner \
   --target http://TARGET \
   --username admin --password password \
-  --output reports/scan \
   --format both
 ```
 
-### Scan with sqlmap and Nikto
-
-sqlmap and Nikto are already installed in the image — just add the flags:
+### Full scan with sqlmap, Nikto, and screenshots
 
 ```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  wstg-scanner \
-  --target http://TARGET \
-  --username admin --password password \
-  --use-sqlmap --use-nikto \
-  --output reports/scan \
-  --format both
-```
-
-### Full scan with screenshots
-
-Screenshots are saved inside the container at `/scanner/evidence/`. Mount a second volume to retrieve them:
-
-```bash
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  -v $(pwd)/evidence:/scanner/evidence \
-  wstg-scanner \
+docker compose run --rm scanner \
   --target http://TARGET \
   --username admin --password password \
   --use-sqlmap --use-nikto \
   --screenshots \
-  --output reports/scan \
   --format both
 ```
+
+Screenshots land in `./evidence/` on your host.
 
 ### Show help
 
 ```bash
-docker run --rm wstg-scanner --help
+docker compose run --rm scanner --help
 ```
 
 ---
 
 ## Scan DVWA with Docker Compose
 
-The `docker-compose.yml` spins up both the scanner and DVWA (plus an optional Juice Shop) together on a shared internal network. The scanner reaches DVWA by its service hostname (`http://dvwa`) without any port exposure needed.
+The `docker-compose.yml` spins up both the scanner and DVWA together on a shared internal network. The scanner reaches DVWA by its service hostname (`http://dvwa`) without any port exposure needed.
 
 ### Before you start
 
@@ -210,7 +185,6 @@ docker compose run --rm scanner \
   --username admin \
   --password password \
   --format both \
-  --output reports/scan \
   --report-base-url http://localhost:42001
 ```
 
@@ -228,7 +202,6 @@ docker compose run --rm scanner \
   --use-sqlmap --use-nikto \
   --screenshots \
   --format both \
-  --output reports/scan \
   --report-base-url http://localhost:42001
 ```
 
@@ -242,19 +215,6 @@ docker compose up -d dvwa dvwa-setup
 docker compose logs -f dvwa-setup
 ```
 
-### Scan Juice Shop (optional profile)
-
-```bash
-# Start Juice Shop
-docker compose --profile juice-shop up -d juice-shop
-
-# Run the scanner against it
-docker compose run --rm scanner \
-  --target http://juice-shop:3000 \
-  --format both \
-  --output reports/scan
-```
-
 ### Stop everything
 
 ```bash
@@ -265,26 +225,41 @@ docker compose down
 
 ## Local Installation
 
-Local installation is an alternative to Docker. It requires Python, Chromium, and — if you want sqlmap or Nikto — a Kali Linux environment (or manual installation).
+Local installation is an alternative to Docker. All commands should be run from the **`scanner/` directory**.
 
-### 1. Install Python dependencies
+### Step 1 — Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Install Playwright and Chromium
+> **Kali Linux:** add `--break-system-packages` if pip refuses to install outside a virtual environment.
+
+### Step 2 — Install Playwright and Chromium
 
 ```bash
 playwright install chromium
+playwright install-deps chromium    # Linux only — installs OS-level browser deps
 ```
 
-### 3. Install external tools (optional, Kali Linux)
+### Step 3 — Install external tools (optional)
 
-```bash
-sudo apt install sqlmap
-sudo apt install nikto
-```
+| Platform | sqlmap | Nikto |
+|---|---|---|
+| **Kali Linux** | Pre-installed (or `sudo apt install sqlmap`) | Pre-installed (or `sudo apt install nikto`) |
+| **Ubuntu / Debian** | `sudo apt install sqlmap` | `sudo apt install nikto` |
+| **macOS** | `brew install sqlmap` | `brew install nikto` |
+| **Windows** | `pip install sqlmap` | Requires Perl — use WSL2 instead (see below) |
+
+### Platform notes
+
+**macOS:** Works natively on Intel and Apple Silicon. Install Homebrew (`brew.sh`) for the simplest path to sqlmap and Nikto.
+
+**Linux (Ubuntu / Debian):** Run `playwright install-deps chromium` to install the shared libraries (`libgtk`, `libnss`, etc.) required by Playwright's bundled Chromium.
+
+**Kali Linux:** sqlmap and Nikto are typically pre-installed. Run `playwright install chromium && playwright install-deps chromium` to add the browser.
+
+**Windows:** The scanner runs natively but Nikto requires Perl and is difficult to set up without a package manager. **WSL2 is strongly recommended** — install Ubuntu via WSL2, then follow the Linux instructions above. Docker Desktop with WSL2 integration is the simplest path on Windows.
 
 ---
 
@@ -318,7 +293,7 @@ python3 main.py --help
 | `--log-level` | | `info` | Logging verbosity: `debug`, `info`, `warning`, `error`, `critical`. Overridden by `--verbose` |
 | `--max-depth` | | `2` | Maximum crawl depth from the starting URL |
 | `--open` | | `False` | Open the report(s) in the default browser when the scan completes |
-| `--output` | `-o` | `report` | Base name for the output file, without extension (extension added automatically) |
+| `--output` | `-o` | `scan-YYYYMMDD-HHMMSS` | Base name for the output file. A timestamp is always appended (e.g. `--output myscan` → `myscan-20260506-153042.html`). Defaults to `scan-YYYYMMDD-HHMMSS` when omitted. Successive scans never overwrite each other. |
 | `--password` | | `None` | Password for login — use with `--username` |
 | `--report-base-url` | | `None` | Public-facing base URL to substitute into report links. Use when the scanner reaches the target via an internal hostname (e.g. `http://dvwa`) but report links should be browser-accessible (e.g. `http://localhost:42001`) |
 | `--screenshots` | | `False` | Capture browser screenshots as evidence for findings |
@@ -385,7 +360,7 @@ python3 main.py --target http://localhost:8080 --format html --open
 
 Two optional integrations can be enabled at runtime. Both tools degrade gracefully — if they are not installed, the scanner logs a warning and continues without them.
 
-When running via **Docker**, sqlmap and Nikto are already installed in the image. No separate installation is needed — just add `--use-sqlmap` or `--use-nikto` to your `docker run` or `docker compose run` command.
+When running via **Docker**, sqlmap and Nikto are already installed in the image. No separate installation is needed — just add `--use-sqlmap` or `--use-nikto` to your `docker compose run` command.
 
 ### sqlmap (`--use-sqlmap`)
 
@@ -447,12 +422,11 @@ The HTML report renders CWE and CVE count as clickable links to MITRE and NVD re
 
 ## Test Targets
 
-The scanner is designed to be tested locally against intentionally vulnerable applications:
+The scanner is designed to be tested locally against intentionally vulnerable applications. The recommended target is:
 
 - **DVWA** (Damn Vulnerable Web Application) — `https://github.com/digininja/DVWA`
-- **OWASP Juice Shop** — `https://github.com/juice-shop/juice-shop`
 
-The easiest way to run them is via Docker Compose — see the [Scan DVWA with Docker Compose](#scan-dvwa-with-docker-compose) section above. Both targets are already configured in `docker-compose.yml`.
+The easiest way to run it is via Docker Compose — see the [Scan DVWA with Docker Compose](#scan-dvwa-with-docker-compose) section above.
 
 Alternatively, to run DVWA standalone:
 
@@ -469,15 +443,12 @@ python3 main.py --target http://localhost:42001 \
   --username admin --password password \
   --format both --screenshots
 
-# Docker
-docker run --rm \
-  -v $(pwd)/reports:/scanner/reports \
-  wstg-scanner \
+# Docker Compose
+docker compose run --rm scanner \
   --target http://localhost:42001 \
   --username admin --password password \
   --use-sqlmap --use-nikto \
-  --format both \
-  --output reports/scan
+  --format both
 ```
 
 > **Note:** When running DVWA via Docker Compose, the scanner reaches it as `http://dvwa` (internal hostname). When running DVWA standalone on your host, use `http://localhost:42001` — but replace `localhost` with `host.docker.internal` if you are running the scanner itself inside Docker.

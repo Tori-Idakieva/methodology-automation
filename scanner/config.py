@@ -13,8 +13,8 @@ from typing import Optional
 @dataclass
 class ScannerConfig:
     # Target & output
-    target: str = "http://localhost"
-    output: str = "report"              # base name, no extension
+    target: str          = "http://localhost"
+    output: Optional[str] = None        # base name, no extension; auto-generated if None
     format: str = "html"
     # When the scanner reaches the target via an internal network address
     # (e.g. Docker service name "http://dvwa") but the user's browser uses a

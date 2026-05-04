@@ -17,14 +17,6 @@
 #
 #   Reports land in ./reports/ on your host machine.
 #
-# Quick start with Juice Shop (add --profile juice-shop):
-#
-#   docker compose --profile juice-shop up -d juice-shop
-#   docker compose run --rm scanner \
-#     --target http://juice-shop:3000 \
-#     --format both \
-#     --output reports/scan
-#
 # ============================================================
 
 services:
@@ -111,20 +103,9 @@ services:
     command: ["sh", "-c", "apk add --no-cache curl -q && sh /setup-dvwa.sh"]
     restart: "no"
 
-  # ── OWASP Juice Shop (optional test target) ───────────────────────────
-  # Enable with: docker compose --profile juice-shop up -d juice-shop
-  juice-shop:
-    image: bkimminich/juice-shop:latest
-    ports:
-      - "3000:3000"      # http://localhost:3000
-    networks:
-      - scan-net
-    profiles:
-      - juice-shop
-
 # ── Shared network ────────────────────────────────────────────────────
 # All services share this bridge network so the scanner can reach
-# DVWA and Juice Shop by their service names as hostnames.
+# DVWA by its service name as a hostname.
 networks:
   scan-net:
     driver: bridge

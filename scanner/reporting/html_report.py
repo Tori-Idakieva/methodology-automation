@@ -6,10 +6,11 @@ Easier to read than JSON — intended for sharing and presentation.
 No external dependencies — all CSS is inlined.
 """
 
+import os
 from datetime import datetime, timezone
 from typing import List
 from config import ScannerConfig
-from utils.file_handler import save_html
+from utils.file_handler import save_html, REPORTS_DIR
 from utils.logger import get_logger
 from reporting import severity_counts, SEVERITY_ORDER
 
@@ -35,7 +36,7 @@ class HTMLReporter:
 
         Returns the path of the written file.
         """
-        path = f"{self.config.output}.html"
+        path = os.path.join(REPORTS_DIR, f"{self.config.output}.html")
         html = self._render(findings)
         save_html(path, html)
         logger.info(f"HTML report written to: {path}")

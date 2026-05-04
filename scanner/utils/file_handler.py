@@ -8,11 +8,13 @@ Provides safe write wrappers and evidence directory management
 import os
 import json
 import webbrowser
+from datetime import datetime
 from typing import Any
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+REPORTS_DIR  = "reports"
 EVIDENCE_DIR = "evidence"
 
 
@@ -63,7 +65,14 @@ def open_file(path: str) -> None:
 
 
 def screenshot_path(label: str) -> str:
-    """Return a full path for a screenshot file inside the evidence dir."""
+    """
+    Return a timestamped path for a screenshot file inside the evidence dir.
+
+    Format: evidence/<label>-YYYYMMDD-HHMMSS.png
+    The timestamp ensures screenshots from successive scans never overwrite
+    each other, matching the behaviour of the HTML/JSON report filenames.
+    """
     ensure_evidence_dir()
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe_label = label.replace("/", "_").replace(":", "")
-    return os.path.join(EVIDENCE_DIR, f"{safe_label}.png")
+    return os.path.join(EVIDENCE_DIR, f"{safe_label}-{timestamp}.png")
